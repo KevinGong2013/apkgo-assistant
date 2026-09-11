@@ -45,8 +45,24 @@ const APKGO_PANEL_CSS = `
 .conn a { color: #18E299; text-decoration: none; }
 .pre { margin: 0; padding: 0 0 0 16px; color: #C9D6D0; font-size: 12px; }
 .pre li { margin: 2px 0; }
-.oneclick { margin: 2px 0 12px; }
-.oneclick .btn { width: 100%; }
+.wizard .btn { width: 100%; margin-top: 2px; }
+.wizard .hint { margin-top: 8px; }
+.prog { list-style: none; margin: 12px 0 0; padding: 0; }
+.prog li { display: flex; align-items: center; gap: 9px; padding: 5px 0; font-size: 12px; color: #8FA39A; }
+.prog li.ok { color: #C9D6D0; }
+.prog li.cur { color: #fff; font-weight: 600; }
+.prog li.err { color: #FCA5A5; }
+.prog .pn { width: 18px; height: 18px; border-radius: 50%; border: 1.5px solid rgba(255,255,255,.18); font-size: 10px; display: grid; place-items: center; flex-shrink: 0; }
+.prog li.ok .pn { background: #18E299; border-color: #18E299; color: #04160E; }
+.prog li.cur .pn { border-color: #18E299; color: #18E299; }
+.prog li.err .pn { border-color: #F87171; color: #F87171; }
+.prog .pw { margin-left: auto; font-size: 11px; color: #18E299; font-weight: 500; }
+.manual { margin-top: 14px; border-top: 1px solid rgba(255,255,255,.06); padding-top: 10px; }
+.manual summary { cursor: pointer; font-size: 12px; color: #8FA39A; list-style: none; display: flex; align-items: center; gap: 6px; }
+.manual summary::before { content: "▸"; font-size: 11px; }
+.manual[open] summary::before { content: "▾"; }
+.manual summary::-webkit-details-marker { display: none; }
+.manual > .sec:first-of-type { margin-top: 10px; }
 .steps { list-style: none; margin: 0; padding: 0; }
 .steps li { display: flex; gap: 9px; align-items: flex-start; padding: 6px 0; }
 .steps .n { width: 18px; height: 18px; border-radius: 50%; border: 1.5px solid rgba(255,255,255,.18); font-size: 10px; font-weight: 600; color: #8FA39A; display: grid; place-items: center; flex-shrink: 0; margin-top: 2px; }

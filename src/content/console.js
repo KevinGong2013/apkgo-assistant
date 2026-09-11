@@ -23,6 +23,9 @@
   let result = null;  // { kind: ok|err|warn, html }
   let busy = false;
   let busyAction = "";
+  // 一键流程的进度：idle → goto → filling → confirm（等用户点弹窗确认）→ captured → saving → done | error
+  let stage = "idle";
+  let manualOpen = false; // 「手动模式」折叠是否展开；自动流程失败时自动展开
 
   // ---- shadow host ----
   const host = document.createElement("div");
@@ -88,10 +91,8 @@
     const preHtml = recipe.prereq.length
       ? `<div class="sec"><div class="sec-t">先确认</div><ul class="pre">${recipe.prereq.map((p) => `<li>${esc(p)}</li>`).join("")}</ul></div>` : "";
 
-    const oneClick = recipe.flow && recipe.flow.length
-      ? `<div class="oneclick"><button class="btn acc" data-oneclick="1" ${busyAction || !paired ? "disabled" : ""}>${busyAction ? "正在替你点…" : "一键获取密钥"}</button><div class="hint">扩展会跳到密钥页、打开创建弹窗并填好；唯一留给你的是弹窗上的「确认」。之后下载、保存、验证都自动完成。</div></div>`
-      : "";
-    const stepsHtml = `<div class="sec"><div class="sec-t">在 ${esc(recipe.product)} 里</div>${oneClick}<ol class="steps">${recipe.steps.map((s, i) => `<li><span class="n">${i + 1}</span><div style="flex:1;min-width:0"><div class="st">${esc(s.t)}</div>${s.d ? `<div class="sd">${esc(s.d)}</div>` : ""}</div>${s.action ? `<button class="mini ${busyAction === s.action ? "on" : ""}" data-action="${esc(s.action)}" ${busyAction ? "disabled" : ""}>${busyAction === s.action ? "正在点…" : "帮我点"}</button>` : ""}</li>`).join("")}</ol></div>`;
+    const hasFlow = !!(recipe.flow && recipe.flow.length);
+    const stepsHtml = `<div class="sec"><div class="sec-t">在 ${esc(recipe.product)} 里</div><ol class="steps">${recipe.steps.map((s, i) => `<li><span class="n">${i + 1}</span><div style="flex:1;min-width:0"><div class="st">${esc(s.t)}</div>${s.d ? `<div class="sd">${esc(s.d)}</div>` : ""}</div>${s.action ? `<button class="mini ${busyAction === s.action ? "on" : ""}" data-action="${esc(s.action)}" ${busyAction ? "disabled" : ""}>${busyAction === s.action ? "正在点…" : "帮我点"}</button>` : ""}</li>`).join("")}</ol></div>`;
 
     let formHtml = "";
     if (hasFields) {
@@ -99,9 +100,9 @@
       formHtml = `<div class="sec"><div class="sec-t" style="display:flex;justify-content:space-between;align-items:center">采集
         ${autoable ? '<button class="mini" data-act="auto">自动识别本页</button>' : ""}</div>` +
         fields.map((f) => fieldHtml(f)).join("") +
-        `<div class="field"><label>备注名（可选）</label><input class="in" data-k="__label" placeholder="默认「${esc(recipe.cn)}账号」，同一商店多个账号时区分" value="${esc(draft.label)}"></div>` +
+        (hasFlow ? "" : `<div class="field"><label>备注名（可选）</label><input class="in" data-k="__label" placeholder="默认「${esc(recipe.cn)}账号」，同一商店多个账号时区分" value="${esc(draft.label)}"></div>`) +
         (apps.length ? `<div class="field"><label>关联应用（可选，验证时会更严格）</label><select class="sel" data-k="__app"><option value="">不关联</option>${apps.map((a) => `<option value="${esc(a.id)}" ${draft.appId === a.id ? "selected" : ""}>${esc(a.name)} · ${esc(a.pkg)}</option>`).join("")}</select></div>` : "") +
-        (result ? `<div class="msg ${result.kind}">${result.html}</div>` : "") +
+        (result && !hasFlow ? `<div class="msg ${result.kind}">${result.html}</div>` : "") +
         `<div class="actions"><button class="btn acc" data-act="save" ${busy || !paired ? "disabled" : ""}>${busy ? "保存并验证中…" : "保存到 apkgo 并验证"}</button><button class="btn ghost" data-act="clear">清空</button></div>
         <div class="hint">保存时 apkgo 会连一次 ${esc(recipe.cn)}确认密钥可用。密钥加密保存，只在这台浏览器的会话里暂存。</div></div>`;
     } else {
@@ -109,11 +110,41 @@
         (result ? `<div class="msg ${result.kind}">${result.html}</div>` : "");
     }
 
+    let bodyHtml;
+    if (hasFlow) {
+      // 一键模式：只要一个备注名和一个按钮，下面是进度；手动步骤和选文件折叠起来。
+      const running = stage !== "idle" && stage !== "done" && stage !== "error";
+      const wizard = `<div class="sec wizard">
+        <div class="field"><label>备注名（可选）</label><input class="in" data-k="__label" placeholder="默认「${esc(recipe.cn)}账号」，同一商店多个账号时区分" value="${esc(draft.label)}" ${running ? "disabled" : ""}></div>
+        <button class="btn acc" data-oneclick="1" ${running || !paired ? "disabled" : ""}>${running ? "进行中…" : stage === "done" ? "再获取一个" : "一键获取密钥"}</button>
+        ${stage === "idle" ? `<div class="hint">扩展会跳到密钥页、打开创建弹窗并填好；唯一留给你的是弹窗上的「确认」。之后下载、保存、验证自动完成。</div>` : ""}
+        ${progressHtml()}
+      </div>`;
+      const manual = `<details class="manual" ${manualOpen ? "open" : ""}><summary>手动模式：自己按步骤操作、选文件</summary>${preHtml}${stepsHtml}${formHtml}</details>`;
+      bodyHtml = connHtml + '<div style="height:12px"></div>' + wizard + manual;
+    } else {
+      bodyHtml = connHtml + '<div style="height:12px"></div>' + preHtml + stepsHtml + formHtml;
+    }
     panel.innerHTML = `
       <div class="head"><span class="mark">${MARK}</span><div class="t">apkgo 助手<small>${esc(recipe.cn)} · ${esc(recipe.product)}</small></div><button class="x" data-act="close" title="收起">×</button></div>
-      <div class="body">${connHtml}<div style="height:12px"></div>${preHtml}${stepsHtml}${formHtml}</div>`;
+      <div class="body">${bodyHtml}</div>`;
     if (result) { const m = panel.querySelector(".msg"); if (m) m.scrollIntoView({ block: "nearest" }); }
   }
+
+  function progressHtml() {
+    if (stage === "idle") return "";
+    const order = ["goto", "filling", "confirm", "captured", "saving", "done"];
+    const labels = { goto: "跳到密钥页", filling: "打开创建弹窗并填好", confirm: "你点弹窗上的「确认」", captured: "抓到下载的密钥文件", saving: "保存到 apkgo 并验证", done: "完成" };
+    const cur = stage === "error" ? -1 : order.indexOf(stage);
+    const items = order.slice(0, 5).map((k, i) => {
+      const st = stage === "error" ? (i < errorAt ? "ok" : i === errorAt ? "err" : "") : (i < cur || stage === "done" ? "ok" : i === cur ? "cur" : "");
+      return `<li class="${st}"><span class="pn">${st === "ok" ? "✓" : st === "err" ? "!" : i + 1}</span>${esc(labels[k])}${st === "cur" && k === "confirm" ? '<span class="pw">← 在页面上点它</span>' : ""}</li>`;
+    }).join("");
+    const res = result ? `<div class="msg ${result.kind}">${result.html}</div>` : "";
+    return `<ol class="prog">${items}</ol>${res}`;
+  }
+  let errorAt = 0;
+  function setStage(s) { stage = s; if (s !== "error") errorAt = ["goto", "filling", "confirm", "captured", "saving"].indexOf(s); render(); }
 
   function valueOf(f) {
     if (f.kind === "file-b64" || f.kind === "file-text") return draft.config[f.key] ? (draft.files[f.key] || "已选择文件") : "";
@@ -153,6 +184,7 @@
     if (t.dataset.eye) { const inp = panel.querySelector(`input[data-k="${t.dataset.eye}"]`); if (inp) { inp.type = inp.type === "password" ? "text" : "password"; t.textContent = inp.type === "password" ? "显示" : "隐藏"; } return; }
     if (t.dataset.unfile) { delete draft.config[t.dataset.unfile]; delete draft.files[t.dataset.unfile]; await saveDraft(); return render(); }
   });
+  panel.addEventListener("toggle", (e) => { if (e.target.classList && e.target.classList.contains("manual")) manualOpen = e.target.open; }, true);
   panel.addEventListener("input", async (e) => {
     const k = e.target.dataset.k;
     if (!k) return;
@@ -402,9 +434,10 @@
       const msg = await fn({ docs, byText, setInput, highlight, wait, waitFor, draft, textOf });
       result = { kind: "ok", html: esc(msg || "已完成。") };
       busyAction = ""; render();
-      // 让位：面板可能正盖着页面上要点的按钮。
-      togglePanel(false);
-      showNotice(esc(msg || "已完成。"));
+      if (!autoSave) { // 单独点「帮我点」时也让位；一键流程由 oneClick 统一处理
+        togglePanel(false);
+        showNotice(esc(msg || "已完成。"));
+      }
       return true;
     } catch (e) {
       result = { kind: "warn", html: esc(e.message || String(e)) };
@@ -420,13 +453,22 @@
   async function oneClick() {
     const flow = recipe.flow || [];
     if (!flow.length) return;
+    result = null;
     if (!onConsolePage()) {
+      setStage("goto");
       try { await chrome.storage.session.set({ [APKGO.KEY_PENDING]: recipe.id, ["autorun:" + recipe.id]: true }); } catch { /* ignore */ }
       location.href = recipe.console;
       return;
     }
     autoSave = true;
-    for (const id of flow) { if (!(await runAction(id))) { autoSave = false; return; } }
+    setStage("filling");
+    for (const id of flow) {
+      if (!(await runAction(id))) { autoSave = false; manualOpen = true; setStage("error"); return; }
+    }
+    setStage("confirm");
+    // 让位：面板可能正盖着弹窗上的「确认」。
+    togglePanel(false);
+    showNotice(esc((result && result.html) || "请点弹窗上的「确认」，剩下的交给我。"));
   }
 
   // ---- 下载自动抓取：页面一下载密钥文件，直接填进对应的文件字段 ----
@@ -464,11 +506,10 @@
     draft.config[f.key] = f.kind === "file-text" ? text : btoa(unescape(encodeURIComponent(text)));
     draft.files[f.key] = name || "下载的文件";
     await saveDraft();
-    result = { kind: "ok", html: `已自动抓到下载的 ${esc(name || "文件")}，填进了「${esc(f.label)}」。${autoSave ? "正在保存并验证…" : "核对后点保存。"}` };
+    result = { kind: "ok", html: `已自动抓到下载的 ${esc(name || "文件")}。${autoSave ? "正在保存并验证…" : "核对后点保存。"}` };
     hideNotice();
     togglePanel(true);
-    render();
-    if (autoSave) { autoSave = false; submit(fp); }
+    if (autoSave) { autoSave = false; setStage("saving"); submit(fp); } else render();
   }
   chrome.runtime.onMessage.addListener((msg) => {
     if (msg && msg.type === "download-created" && recipe.fields.some((f) => f.capture)) {
@@ -495,10 +536,12 @@
       if (capturedFp) lastSaved = capturedFp;
       await clearDraft();
       launch.classList.remove("has-draft");
+      if (stage !== "idle") { stage = "done"; }
     } else {
       const hint = APKGO.errorHint(r.error);
       result = { kind: "err", html: `${esc(r.error)}${hint ? `<div class="hint" style="color:inherit;opacity:.85">${esc(hint)}</div>` : ""}` };
       if (r.status === 401) paired = null;
+      if (stage !== "idle") { stage = "error"; errorAt = 4; manualOpen = true; }
     }
     render();
   }
@@ -515,7 +558,7 @@
     try {
       const { [APKGO.KEY_PENDING]: pending, ["autorun:" + recipe.id]: autorun } = await chrome.storage.session.get([APKGO.KEY_PENDING, "autorun:" + recipe.id]);
       if (pending === recipe.id) { await chrome.storage.session.remove(APKGO.KEY_PENDING); togglePanel(true); }
-      if (autorun) { await chrome.storage.session.remove("autorun:" + recipe.id); togglePanel(true); await refreshState(); await wait(1500); oneClick(); }
+      if (autorun) { await chrome.storage.session.remove("autorun:" + recipe.id); stage = "goto"; togglePanel(true); await refreshState(); await wait(1500); oneClick(); }
     } catch { /* ignore */ }
   })();
 })();
