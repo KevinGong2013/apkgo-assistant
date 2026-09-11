@@ -62,6 +62,10 @@ python3 scripts/build.py   # 打 zip 到 dist/
 - `src/background.js` — 唯一发网络请求的地方。
 - `src/popup/` — 工具栏弹窗：连接状态、打开面板、前往后台。
 
+## 端到端测试
+
+不用手动装扩展：`npm install && npx playwright install chromium && npm run e2e`。脚本用真 Chromium 加载真正的扩展，起一个伪 apkgo 服务（配对页 + 两个 Open API 端点），把 `open.oppomobile.com` 拦截成一张伪造的「API 密钥管理」页，然后走完配对 → 打开后台 → 自动识别 → 保存成功 / 失败提示 → 弹窗。截图落在 `dist/shots/`，商店截图就是这么来的。
+
 ## 发布到商店
 
 首发要在两家后台手动做一次（注册开发者、建条目、填商店列表和隐私表单、传截图），材料都在 [`store/listing.md`](store/listing.md)。之后每个版本全自动：打 tag → Release 出 zip → [`publish.yml`](.github/workflows/publish.yml) 把同一个 zip 传到 Chrome Web Store 和 Edge Add-ons 并提交审核。
