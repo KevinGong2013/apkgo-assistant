@@ -10,7 +10,7 @@ Chrome / Edge 扩展。打开华为、小米、OPPO、vivo、荣耀、应用宝�
 |---|---|---|
 | 华为 AppGallery | **一键获取**：跳到 Connect API → 打开创建 Service Account 弹窗并填好（开发者级 · APP管理员）→ 你点「确认」→ 抓到下载的 JSON → 自动保存验证 | ✅ 真实后台跑通 |
 | 小米 | **一键获取**：后台接口自动获取账号邮箱 + 页面自动提取私钥 → 自动保存验证（公钥由 apkgo 内置） | ✅ 真实后台实登核对 |
-| OPPO | 采集：client_id / client_secret（自动识别或点选） | ⚠️ 未实登核对 |
+| OPPO | **一键获取**：进入「我的API」→ 自动获取或新建服务端应用 → 提取 Client ID 和 Secret → 自动保存验证 | ✅ 真实后台实登核对 |
 | vivo | 采集：access_key / access_secret | ⚠️ 未实登核对 |
 | 荣耀 | 采集：client_id / client_secret | ⚠️ 未实登核对 |
 | 应用宝 | 采集：user_id / access_secret / app_id | ⚠️ 未实登核对 |

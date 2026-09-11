@@ -39,7 +39,7 @@ try {
   step("open-console opened tab", { url: autoTab.url() });
   await autoTab.close();
   const oppo = await ctx.newPage();
-  await oppo.goto("https://open.oppomobile.com/");
+  await oppo.goto("https://open.oppomobile.com/new/api/myapi");
   await oppo.waitForSelector("#apkgo-assistant-root", { state: "attached", timeout: 10000 });
   await oppo.waitForTimeout(2600); // 让启动按钮的滑入动画结束
   await oppo.screenshot({ path: path.join(HERE, "../../dist/shots/00-launcher.png") });
@@ -67,24 +67,12 @@ try {
   step("panel open", { className: opened });
   await oppo.screenshot({ path: path.join(HERE, "../../dist/shots/01-panel.png") });
 
-  // 3. 自动识别
-  await inShadow(`(sr) => sr.querySelector('[data-act=auto]').click()`);
-  await oppo.waitForTimeout(500);
-  step("auto-detect", await inShadow(`(sr) => ({ id: sr.querySelector('input[data-k=client_id]').value, secret: sr.querySelector('input[data-k=client_secret]').value, msg: (sr.querySelector('.msg')||{}).textContent })`));
-  await oppo.screenshot({ path: path.join(HERE, "../../dist/shots/02-detected.png") });
-
-  // 4. 保存 → 伪 apkgo 返回 201
-  await inShadow(`(sr) => { const s = sr.querySelector('select[data-k=__app]'); if (s) { s.value = 'a1'; s.dispatchEvent(new Event('change', { bubbles: true })); } sr.querySelector('[data-act=save]').click(); }`);
-  await oppo.waitForTimeout(1500);
-  step("save ok", await inShadow(`(sr) => ({ msg: (sr.querySelector('.msg')||{}).textContent, idAfter: sr.querySelector('input[data-k=client_id]').value })`));
+  // 3. OPPO 一键获取：自动抓取 Client ID 与 Secret → 自动保存验证
+  step("oppo one-click present", { btn: await inShadow(`(sr) => !!sr.querySelector('[data-oneclick]')`) });
+  await inShadow(`(sr) => sr.querySelector('[data-oneclick]').click()`);
+  await oppo.waitForTimeout(2500);
+  step("oppo saved", await inShadow(`(sr) => ({ msg: (sr.querySelector('.msg')||{}).textContent, prog: (sr.querySelector('.prog')||{}).textContent })`));
   await oppo.screenshot({ path: path.join(HERE, "../../dist/shots/03-saved.png") });
-
-  // 5. 错误路径：secret=bad → 400 → 面板显示错误 + 提示
-  await inShadow(`(sr) => { for (const [k, v] of [['client_id','30659871'],['client_secret','bad']]) { const i = sr.querySelector('input[data-k='+k+']'); i.value = v; i.dispatchEvent(new Event('input', { bubbles: true })); } }`);
-  await oppo.waitForTimeout(300);
-  await inShadow(`(sr) => sr.querySelector('[data-act=save]').click()`);
-  await oppo.waitForTimeout(1500);
-  step("save error", await inShadow(`(sr) => ({ msg: (sr.querySelector('.msg')||{}).textContent })`));
 
   // 6. 服务端真的收到了什么
   const received = await (await fetch(`${ORIGIN}/__received`)).json();

@@ -531,6 +531,7 @@
     const isReset = stage === "done";
     result = null;
     if (isReset) {
+      for (const f of recipe.fields) delete draft.config[f.key];
       delete draft.config.private_key;
       await saveDraft();
     }

@@ -235,18 +235,209 @@ const APKGO_RECIPES = [
   {
     id: "oppo", cn: "OPPO", product: "OPPO 开放平台",
     hostRe: /(^|\.)open\.oppomobile\.com$/,
-    console: "https://open.oppomobile.com/",
-    prereq: ["需要企业开发者账号", "团队账号请用管理员账号登录，子账号看不到「API 密钥管理」"],
+    console: "https://open.oppomobile.com/new/api/myapi",
+    noManual: true,
+    progressOrder: ["goto", "filling", "saving", "done"],
+    progressLabels: { filling: "自动获取 Client ID 与 Secret", saving: "保存到 apkgo 并验证" },
+    wizardHint: "助手会自动在「我的API」中获取或创建服务端应用，提取 Client ID 和 Secret，并自动保存与验证。",
+    doneBtnText: "新建应用并重新保存",
+    doneHint: "已自动保存并验证 OPPO 开放平台凭据。如需更换应用密钥，可点击重新创建获取。",
+    prereq: [
+      "请登录 OPPO 开放平台开发者账号（主账号或管理员）",
+      "自动在「我的API」获取或创建服务端应用并提取 Client ID 和 Secret",
+    ],
     steps: [
       { t: "登录 OPPO 开放平台", d: "用主账号或管理员账号。" },
-      { t: "管理中心 → 应用服务平台 → API 密钥管理", d: "" },
-      { t: "创建客户端", d: "创建后页面上显示 client_id 和 client_secret。" },
-      { t: "在本面板点「自动识别」或逐项「点选」，然后保存", d: "" },
+      { t: "进入「我的API」页面", d: "https://open.oppomobile.com/new/api/myapi" },
+      { t: "自动获取或新建服务端应用", d: "自动提取 Client ID 和 Client Secret 并保存到 apkgo 验证。" },
     ],
     fields: [
       { key: "client_id", label: "Client ID", kind: "text", hints: [/client[\s_-]*id/i, /客户端\s*ID/i], pattern: /^\d{4,}$/, required: true },
       { key: "client_secret", label: "Client Secret", kind: "secret", hints: [/client[\s_-]*secret/i, /密钥|secret/i], pattern: /^[A-Za-z0-9]{16,}$/, required: true },
     ],
+    detect: async (h) => {
+      const out = {};
+      for (const doc of h.docs()) {
+        const rows = doc.querySelectorAll(".el-table__row, .ant-table-row, tr, [role='row']");
+        for (const row of rows) {
+          const text = (row.innerText || row.textContent || "").replace(/\s+/g, " ");
+          const idMatch = text.match(/\b(\d{6,22})\b/);
+          const secretMatch = text.match(/\b([a-fA-F0-9]{32,64})\b/);
+          if (idMatch && !out.client_id) out.client_id = idMatch[1];
+          if (secretMatch && !out.client_secret) out.client_secret = secretMatch[1];
+        }
+      }
+      return out;
+    },
+    flow: ["fetch-key"],
+    actions: {
+      "fetch-key": async (h) => {
+        // 查找页面或弹窗表格中的 client_id 和 client_secret
+        const findCredentials = () => {
+          for (const doc of h.docs()) {
+            // 1. 优先按表格行检查（服务端应用列表每行包含名称、client_id、client_secret）
+            const rows = doc.querySelectorAll(".el-table__row, .ant-table-row, tr, [role='row']");
+            for (const row of rows) {
+              if (!row.getClientRects().length) continue;
+              let text = (row.innerText || row.textContent || "").replace(/\s+/g, " ");
+              const idMatch = text.match(/\b(\d{6,22})\b/);
+              let secretMatch = text.match(/\b([a-fA-F0-9]{32,64})\b/);
+
+              // 如果找到 ID 但密钥被掩码，尝试点击行内的眼睛图标揭示明文
+              if (idMatch && !secretMatch) {
+                const eyeBtn = row.querySelector(
+                  ".anticon-eye, .anticon-eye-invisible, .el-icon-view, .el-icon-hide, i[class*='eye'], svg[class*='eye'], [title*='显示'], [title*='查看'], [aria-label*='eye'], [class*='eye'], [class*='view']"
+                );
+                if (eyeBtn) {
+                  eyeBtn.click();
+                  const newText = (row.innerText || row.textContent || "").replace(/\s+/g, " ");
+                  secretMatch = newText.match(/\b([a-fA-F0-9]{32,64})\b/);
+                }
+              }
+
+              if (idMatch && secretMatch) {
+                return { clientId: idMatch[1], clientSecret: secretMatch[1], row };
+              }
+            }
+
+            // 2. 检查所有输入框或文本域
+            let foundId = "";
+            let foundSecret = "";
+            for (const inp of doc.querySelectorAll("input, textarea")) {
+              const v = (inp.value || "").trim();
+              if (/^\d{6,22}$/.test(v) && !foundId) foundId = v;
+              if (/^[a-fA-F0-9]{32,64}$/.test(v) && !foundSecret) foundSecret = v;
+            }
+            if (foundId && foundSecret) {
+              return { clientId: foundId, clientSecret: foundSecret };
+            }
+
+            // 3. 兜底扫描页面文本（支持 Client ID: xxx 这种键值对表格）
+            const bodyText = (doc.body && doc.body.innerText) || "";
+            const idM = bodyText.match(/(?:client[_\s-]*id|客户端\s*id)[\s:=：]+(\d{6,22})/i) || bodyText.match(/\b(\d{6,22})\b/);
+            const secM = bodyText.match(/(?:client[_\s-]*secret|密钥|secret)[\s:=：]+([a-fA-F0-9]{32,64})/i) || bodyText.match(/\b([a-fA-F0-9]{32,64})\b/);
+            if (idM && secM) {
+              return { clientId: idM[1], clientSecret: secM[1] };
+            }
+          }
+          return null;
+        };
+
+        // 步骤 1：若已有凭证且非重置模式，直接提取
+        let creds = !h.isReset ? findCredentials() : null;
+
+        if (!creds) {
+          // 若弹窗未打开，看是否有「选择应用」或「切换应用」按钮
+          const chooseBtn = h.byText("button, a, div, span", /^(选择应用|切换应用)$/);
+          const hasDialog = [...document.querySelectorAll(".el-dialog, .ant-modal, [role='dialog'], .modal")].some((d) => d.getClientRects().length);
+          if (chooseBtn && !hasDialog) {
+            chooseBtn.click();
+            await h.wait(500);
+          }
+
+          // 步骤 2：切换到「服务端应用」标签
+          const serverTab = h.byText("button, a, div, span, li, .el-tabs__item, .ant-tabs-tab", /^(服务端应用|服务器应用)$/) ||
+                            h.byText("*", /^服务端应用$/);
+          if (serverTab) {
+            serverTab.click();
+            await h.wait(600);
+          }
+
+          // 步骤 3：切换标签后再次检查是否有现成应用
+          if (!h.isReset) {
+            creds = findCredentials();
+          }
+        }
+
+        // 步骤 4：无现成应用或重置模式下，点击「新建应用」并填写创建
+        if (!creds) {
+          // 记录当前已存在的 ID，重置时确保选取新建的应用
+          const existingIds = new Set();
+          for (const doc of h.docs()) {
+            const matches = (doc.body.innerText || "").match(/\b\d{6,22}\b/g) || [];
+            matches.forEach((id) => existingIds.add(id));
+          }
+
+          const createBtn = h.byText("button, a, div, span", /^新建应用\s*\+?$/) ||
+                            h.byText("button, a, div, span", /新建应用/);
+          if (!createBtn) {
+            throw new Error("未找到「新建应用」按钮，请确认已在「我的API」页面并处于登录状态。");
+          }
+          createBtn.click();
+          await h.wait(800);
+
+          // 进入「新建应用」弹窗，选择「服务端应用」单选
+          const modals = [...document.querySelectorAll(".el-dialog, .ant-modal, [role='dialog'], .modal")].filter((m) => m.getClientRects().length);
+          const modal = modals[modals.length - 1] || document;
+
+          const radios = [...modal.querySelectorAll(".el-radio, .ant-radio-wrapper, label, div, span")];
+          const serverRadio = radios.find((el) => /^服务端应用$/.test(h.textOf(el).trim()) && el.getClientRects().length);
+          if (serverRadio) {
+            serverRadio.click();
+            await h.wait(300);
+          }
+
+          // 填写应用名称（若重置则加随机后缀避免重名冲突）
+          let nameInput = modal.querySelector("input[placeholder*='名称'], input[name*='name'], input[placeholder*='输入应用名称']");
+          if (!nameInput) {
+            const labels = [...modal.querySelectorAll("label, .el-form-item__label, .ant-form-item-label, span, div")];
+            const nameLabel = labels.find((l) => /应用名称/.test(h.textOf(l).trim()) && l.getClientRects().length);
+            if (nameLabel) {
+              const formItem = nameLabel.closest(".el-form-item, .ant-form-item, tr, div");
+              if (formItem) nameInput = formItem.querySelector("input");
+            }
+          }
+          if (!nameInput) {
+            const inputs = [...modal.querySelectorAll("input:not([type='hidden']):not([type='radio']):not([type='checkbox'])")];
+            nameInput = inputs.find((i) => i.getClientRects().length && !i.disabled && !i.readOnly);
+          }
+
+          if (nameInput) {
+            const appName = h.isReset ? `apkgo_${Date.now().toString(36).slice(-4)}` : "apkgo";
+            h.setInput(nameInput, appName);
+            await h.wait(300);
+          }
+
+          // 点击「确定」创建
+          const confirmBtn = [...modal.querySelectorAll("button, a, span")]
+            .find((b) => /^确定$/.test(h.textOf(b).trim()) && b.getClientRects().length);
+          if (confirmBtn) {
+            confirmBtn.click();
+            await h.wait(1000);
+          }
+
+          // 等待凭证渲染在列表中
+          creds = (await h.waitFor(() => {
+            const c = findCredentials();
+            if (!c) return null;
+            if (h.isReset && existingIds.has(c.clientId)) return null;
+            return c;
+          }, 8000)) || findCredentials();
+        }
+
+        // 兜底再次检查眼睛图标
+        if (!creds || !creds.clientId || !creds.clientSecret) {
+          for (const doc of h.docs()) {
+            const eyes = doc.querySelectorAll(".anticon-eye, .anticon-eye-invisible, .el-icon-view, .el-icon-hide, i[class*='eye'], svg[class*='eye']");
+            for (const eye of eyes) {
+              if (eye.getClientRects().length) {
+                eye.click();
+                await h.wait(200);
+              }
+            }
+          }
+          creds = findCredentials();
+        }
+
+        if (!creds || !creds.clientId || !creds.clientSecret) {
+          throw new Error("未能自动获取到 Client ID 与 Client Secret，请确认列表中已展示服务端应用。");
+        }
+
+        h.draft.config.client_id = creds.clientId;
+        h.draft.config.client_secret = creds.clientSecret;
+        return `已自动获取 Client ID（${creds.clientId}）与 Client Secret！正在保存并验证…`;
+      },
+    },
   },
   {
     id: "vivo", cn: "vivo", product: "vivo 开放平台",
