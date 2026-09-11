@@ -410,18 +410,144 @@ const APKGO_RECIPES = [
   {
     id: "vivo", cn: "vivo", product: "vivo 开放平台",
     hostRe: /(^|\.)dev\.vivo\.com\.cn$/,
-    console: "https://dev.vivo.com.cn/",
-    prereq: ["请用主账号操作", "沙箱密钥和正式密钥是两对，apkgo 只用正式的"],
+    console: "https://dev.vivo.com.cn/apiAccess/detail",
+    noManual: true,
+    hideWizardFields: true,
+    progressOrder: ["goto", "filling", "saving", "done"],
+    progressLabels: { filling: "自动获取 Access Key 与 Secret", saving: "保存到 apkgo 并验证" },
+    wizardHint: "助手会自动通过官方接口获取 Access Key 和 Access Secret，并自动保存与验证。",
+    doneBtnText: "重新获取并保存",
+    doneHint: "已自动保存并验证 vivo 开放平台凭据。",
+    prereq: [
+      "请登录 vivo 开放平台开发者账号（主账号）",
+      "自动通过官方后台接口获取 Access Key 和 Access Secret",
+    ],
     steps: [
-      { t: "登录 vivo 开放平台", d: "" },
-      { t: "账号 → 账号管理 → API 管理", d: "也可能在「分发服务 → API 接入」。" },
-      { t: "点「立即开通」", d: "开通后平台分配 access_key 和 access_secret。" },
-      { t: "在本面板采集这两个值并保存", d: "" },
+      { t: "登录 vivo 开放平台", d: "用主账号操作。" },
+      { t: "进入 API 管理页面", d: "https://dev.vivo.com.cn/apiAccess/detail" },
+      { t: "一键获取并保存凭据", d: "自动获取 Access Key 和 Access Secret 并保存到 apkgo 验证。" },
     ],
     fields: [
       { key: "access_key", label: "Access Key", kind: "text", hints: [/access[\s_-]*key/i], pattern: /^[A-Za-z0-9]{8,}$/, required: true },
       { key: "access_secret", label: "Access Secret", kind: "secret", hints: [/access[\s_-]*secret/i, /secret|密钥/i], pattern: /^[A-Za-z0-9]{16,}$/, required: true },
     ],
+    detect: async () => {
+      const out = {};
+      try {
+        const getCsrf = () => {
+          const m = document.cookie.match(/(?:^|;\s*)csrftoken=([^;]+)/);
+          return m ? m[1] : "";
+        };
+        const headers = { "Accept": "application/json, text/plain, */*" };
+        const csrf = getCsrf();
+        if (csrf) headers["csrftoken"] = csrf;
+        const ts = Date.now();
+        const reqId = `${ts}${Math.random().toString().slice(2, 13)}`;
+        const res = await fetch(`https://dev.vivo.com.cn/webapi/access/detail?timestamp=${ts}&requestId=${reqId}`, {
+          method: "GET",
+          headers,
+          credentials: "include",
+        });
+        if (res.ok) {
+          const d = await res.json();
+          if (d && d.code === 0 && d.data && d.data.accessKey && d.data.accessSecret) {
+            out.access_key = String(d.data.accessKey);
+            out.access_secret = String(d.data.accessSecret);
+            return out;
+          }
+        }
+      } catch { /* ignore */ }
+      return out;
+    },
+    isLoggedIn: async (h) => {
+      if (/passport|login/i.test(location.href)) return false;
+      const ck = document.cookie || "";
+      if (ck.includes("b_account_token") || ck.includes("b_account_username")) return true;
+      for (const doc of h.docs()) {
+        if (doc.querySelector("#login_form, .login-container, form[action*='login']")) return false;
+        const hasLogin = [...doc.querySelectorAll("a, button, span")].some((el) => /^登录$/.test(h.textOf(el).trim()) && el.getClientRects().length);
+        const hasUser = doc.querySelector(".user-name, .user-info, [class*='avatar'], .header-user, .store-user, .logout, .head-portrait");
+        if (hasLogin && !hasUser) return false;
+      }
+      return true;
+    },
+    flow: ["fetch-key"],
+    actions: {
+      "fetch-key": async (h) => {
+        if (/login|passport/i.test(location.href)) {
+          throw new Error("检测到您尚未登录 vivo 开放平台，请先登录开发者账号后再获取密钥。");
+        }
+
+        const getCsrf = () => {
+          const m = document.cookie.match(/(?:^|;\s*)csrftoken=([^;]+)/);
+          return m ? m[1] : "";
+        };
+
+        const fetchDetail = async () => {
+          try {
+            const ts = Date.now();
+            const reqId = `${ts}${Math.random().toString().slice(2, 13)}`;
+            const headers = {
+              "Accept": "application/json, text/plain, */*",
+            };
+            const csrf = getCsrf();
+            if (csrf) headers["csrftoken"] = csrf;
+
+            const res = await fetch(`https://dev.vivo.com.cn/webapi/access/detail?timestamp=${ts}&requestId=${reqId}`, {
+              method: "GET",
+              headers,
+              credentials: "include",
+            });
+            if (res.ok) {
+              const d = await res.json();
+              if (d && d.code === 0 && d.data && d.data.accessKey && d.data.accessSecret) {
+                return d.data;
+              }
+            }
+          } catch { /* ignore */ }
+          return null;
+        };
+
+        const detail = await fetchDetail();
+        if (detail && detail.accessKey && detail.accessSecret) {
+          h.draft.config.access_key = String(detail.accessKey);
+          h.draft.config.access_secret = String(detail.accessSecret);
+          return `已成功获取 vivo API 凭据（Access Key: ${detail.accessKey}）！正在保存并验证…`;
+        }
+
+        // 离线/测试环境纯文本兜底（不进行任何脆弱的 UI 交互）
+        for (const doc of h.docs()) {
+          const text = (doc.body && doc.body.innerText) || "";
+          const keyMatch = text.match(/20\d{6}[A-Za-z0-9]{6,20}/) || text.match(/\b([A-Za-z0-9]{12,24})\b/);
+          const secMatch = text.match(/\b([a-fA-F0-9]{32})\b/);
+          if (keyMatch && secMatch && keyMatch[1] !== secMatch[1]) {
+            h.draft.config.access_key = keyMatch[1] || keyMatch[0];
+            h.draft.config.access_secret = secMatch[1] || secMatch[0];
+            return `已获取凭据！正在保存并验证…`;
+          }
+        }
+
+        // 若接口未返回凭据，可能尚未开通 API 传包
+        const targetUrl = "https://dev.vivo.com.cn/apiAccess/detail";
+        if (!location.href.includes("/apiAccess/detail")) {
+          location.href = targetUrl;
+          throw new Error("未能获取到凭据，正在为您跳转到 API 管理页面。请在页面上点击「立即开通」签署协议，完成后再点击「一键获取密钥」。");
+        }
+
+        // 若已在 /apiAccess/detail 页面，尝试提示并高亮页面上的「立即开通」或签约按钮
+        for (const doc of h.docs()) {
+          const openBtn = [...doc.querySelectorAll("button, a, div, span")].find(
+            (el) => /^(立即开通|开通|签署协议|去签约)$/.test(h.textOf(el).trim()) && el.getClientRects().length
+          );
+          if (openBtn) {
+            h.highlight(openBtn);
+            throw new Error("检测到您尚未开通 API 传包能力。请先点击页面上绿框标注的「立即开通」按钮签署协议，开通后再点击「一键获取密钥」。");
+          }
+        }
+
+        throw new Error("未能获取到 Access Key 与 Access Secret，请确认处于登录状态并已在「API管理」中开通 API 传包能力。");
+      },
+    },
   },
   {
     id: "honor", cn: "荣耀", product: "荣耀开发者服务平台",
