@@ -51,7 +51,11 @@ const APKGO_RECIPES = [
           const els = [...dlg.querySelectorAll("*")].filter((el) => el.children.length <= 2 && norm(h.textOf(el)) === want && el.getClientRects().length);
           const el = els[els.length - 1];
           if (!el) return null;
-          return el.closest('label, [role="checkbox"], [role="radio"], .el-checkbox, .el-radio, [class*="checkbox"], [class*="radio"], [class*="check"], li') || el.parentElement || el;
+          // 先找语义明确的容器（label / role / el-*），再退到类名含 checkbox/radio 的祖先，最后用父元素。
+          const c1 = el.closest('label, [role="checkbox"], [role="radio"], .el-checkbox, .el-radio');
+          if (c1) return c1;
+          const c2 = el.parentElement && el.parentElement.closest('[class*="checkbox"], [class*="radio"], li');
+          return c2 || el.parentElement || el;
         };
         const state = (t) => {
           const inp = t.querySelector('input[type="checkbox"], input[type="radio"]');
