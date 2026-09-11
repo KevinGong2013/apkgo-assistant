@@ -42,6 +42,7 @@
     } else if (d.type === "open-console") {
       const r = await send({ type: "openConsole", store: d.store });
       if (!r.ok) reply({ type: "error", message: r.error });
+      else reply({ type: "open-console-ok", store: d.store });
     }
   });
 
