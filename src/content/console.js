@@ -11,6 +11,7 @@
   if (document.getElementById("apkgo-assistant-root")) return;
 
   // viewBox 收紧到正好框住三根横条（x18–82、y26–83），水平垂直居中，去掉原 100×100 画布顶部的空白。
+  const escLabel = (s) => String(s ?? "").replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
   const MARK = '<svg viewBox="12 16.5 76 76" fill="currentColor"><rect x="18" y="70" width="64" height="13" rx="6.5"/><rect x="18" y="51" width="64" height="13" rx="6.5"/><rect x="22" y="26" width="56" height="13" rx="6.5"/></svg>';
   const DRAFT_KEY = APKGO.KEY_DRAFT(recipe.id);
 
@@ -33,7 +34,8 @@
   const launch = document.createElement("button");
   launch.className = "launch";
   launch.title = `apkgo 助手 · ${recipe.cn}`;
-  launch.innerHTML = MARK + '<span class="dot"></span>';
+  const launchSub = recipe.flow && recipe.flow.length ? "一键获取密钥" : (recipe.fields.length ? "采集密钥，直接保存到 apkgo" : "这一家的密钥怎么拿");
+  launch.innerHTML = MARK + `<span class="lbl">apkgo 助手<small>${escLabel(recipe.cn)} · ${launchSub}</small></span><span class="dot"></span>`;
   const panel = document.createElement("div");
   panel.className = "panel";
   const pickbar = document.createElement("div");
@@ -48,6 +50,12 @@
   document.documentElement.appendChild(host);
 
   launch.addEventListener("click", () => { hideNotice(); togglePanel(); });
+  // 引起注意：滑入 + 光环 + 弹跳，本会话里点开过一次就不再闹。
+  (async () => {
+    let seen = false;
+    try { ({ launcherSeen: seen } = await chrome.storage.session.get("launcherSeen")); } catch { /* ignore */ }
+    if (!seen) { launch.classList.add("attn"); setTimeout(() => launch.classList.remove("attn"), 25000); }
+  })();
 
   function esc(s) { return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
 
@@ -160,7 +168,12 @@
   function togglePanel(force) {
     const open = force === undefined ? !panel.classList.contains("open") : force;
     panel.classList.toggle("open", open);
-    if (open) { refreshState(); ensureHook(); }
+    launch.classList.toggle("hide", open);
+    if (open) {
+      launch.classList.remove("attn");
+      try { chrome.storage.session.set({ launcherSeen: true }); } catch { /* ignore */ }
+      refreshState(); ensureHook();
+    }
   }
 
   // ---- storage ----

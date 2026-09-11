@@ -3,12 +3,22 @@
 const APKGO_PANEL_CSS = `
 :host { all: initial; }
 * { box-sizing: border-box; }
-.launch { position: fixed; right: 20px; bottom: 20px; z-index: 2147483000; width: 46px; height: 46px; border-radius: 14px; border: none; background: #0F1613; color: #18E299; display: grid; place-items: center; cursor: pointer; box-shadow: 0 6px 20px rgba(0,0,0,.35), inset 0 0 0 1px rgba(24,226,153,.25); transition: transform .15s; }
-.launch:hover { transform: translateY(-2px); }
-.launch svg { width: 22px; height: 22px; }
-.launch .dot { position: absolute; top: -3px; right: -3px; width: 12px; height: 12px; border-radius: 50%; background: #18E299; border: 2px solid #0F1613; display: none; }
+/* 启动按钮：底部偏右居中的药丸，带文字，出现时滑入 + 绿色光环脉冲 + 弹跳几下，
+   用户点开一次（本会话）后就安静。面板打开时隐藏，避免互相遮挡。 */
+.launch { position: fixed; left: 62%; bottom: 28px; transform: translateX(-50%); z-index: 2147483000; height: 54px; padding: 0 22px 0 14px; border-radius: 9999px; border: none; background: #0F1613; color: #fff; display: flex; align-items: center; gap: 10px; cursor: pointer; font: 600 14px/1 Inter, -apple-system, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif; white-space: nowrap; box-shadow: 0 10px 30px rgba(0,0,0,.35), inset 0 0 0 1px rgba(24,226,153,.35); transition: transform .15s, box-shadow .15s; }
+.launch:hover { transform: translate(-50%, -2px); box-shadow: 0 14px 34px rgba(0,0,0,.4), 0 0 0 4px rgba(24,226,153,.18), inset 0 0 0 1px rgba(24,226,153,.6); }
+.launch svg { width: 26px; height: 26px; color: #18E299; flex-shrink: 0; }
+.launch .lbl small { display: block; font-weight: 400; font-size: 11px; color: #8FA39A; margin-top: 3px; }
+.launch .dot { position: absolute; top: -3px; right: -3px; width: 14px; height: 14px; border-radius: 50%; background: #18E299; border: 2px solid #0F1613; display: none; }
 .launch.has-draft .dot { display: block; }
-.panel { position: fixed; right: 20px; bottom: 76px; z-index: 2147483000; width: 360px; max-height: calc(100vh - 100px); overflow: auto; background: #0F1613; color: #E6EDE9; border: 1px solid rgba(255,255,255,.08); border-radius: 16px; box-shadow: 0 20px 60px rgba(0,0,0,.45); font: 13px/1.5 Inter, -apple-system, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif; display: none; }
+.launch.hide { display: none; }
+.launch.attn { animation: apkgo-pop .55s cubic-bezier(.2,.9,.3,1.2) both, apkgo-bounce 1.3s ease-in-out 1.4s 3; }
+.launch.attn::after { content: ""; position: absolute; inset: -3px; border-radius: 9999px; border: 2px solid #18E299; animation: apkgo-ring 1.7s ease-out infinite; pointer-events: none; }
+@keyframes apkgo-pop { from { transform: translate(-50%, 28px); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }
+@keyframes apkgo-bounce { 0%, 100% { transform: translate(-50%, 0); } 30% { transform: translate(-50%, -10px); } 55% { transform: translate(-50%, 0); } 75% { transform: translate(-50%, -5px); } }
+@keyframes apkgo-ring { 0% { transform: scale(1); opacity: .9; } 100% { transform: scale(1.3); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .launch.attn { animation: none; } .launch.attn::after { animation: none; display: none; } }
+.panel { position: fixed; right: 20px; bottom: 20px; z-index: 2147483000; width: 360px; max-height: calc(100vh - 100px); overflow: auto; background: #0F1613; color: #E6EDE9; border: 1px solid rgba(255,255,255,.08); border-radius: 16px; box-shadow: 0 20px 60px rgba(0,0,0,.45); font: 13px/1.5 Inter, -apple-system, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif; display: none; }
 .panel.open { display: block; }
 .head { display: flex; align-items: center; gap: 10px; padding: 14px 16px; border-bottom: 1px solid rgba(255,255,255,.06); position: sticky; top: 0; background: #0F1613; z-index: 1; }
 .head .mark { width: 26px; height: 26px; border-radius: 8px; background: rgba(24,226,153,.12); color: #18E299; display: grid; place-items: center; }
