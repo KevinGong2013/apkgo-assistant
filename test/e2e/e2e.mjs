@@ -39,7 +39,7 @@ try {
   step("open-console opened tab", { url: autoTab.url() });
   await autoTab.close();
   const oppo = await ctx.newPage();
-  await oppo.goto("https://open.oppomobile.com/new/api/myapi");
+  await oppo.goto("https://open.oppomobile.com/new/ecological/app");
   await oppo.waitForSelector("#apkgo-assistant-root", { state: "attached", timeout: 10000 });
   await oppo.waitForTimeout(2600); // 让启动按钮的滑入动画结束
   await oppo.screenshot({ path: path.join(HERE, "../../dist/shots/00-launcher.png") });

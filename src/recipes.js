@@ -27,11 +27,24 @@ const APKGO_RECIPES = [
     fields: [
       { key: "service_account", label: "服务账号 JSON 文件", kind: "file-b64", accept: ".json,application/json", required: true, capture: { name: /\.json$/i, mime: /json/i } },
     ],
+    isLoggedIn: async (h) => {
+      if (/login|id\d*\.cloud\.huawei\.com|portal\/loginAuth/i.test(location.href)) return false;
+      for (const doc of h.docs()) {
+        if (doc.querySelector("#login_form, .login-container, input[type='password'][name*='login']")) return false;
+        const hasLogin = [...doc.querySelectorAll("a, button, span")].some((el) => /^登录$/.test(h.textOf(el).trim()) && el.getClientRects().length);
+        const hasUser = doc.querySelector(".agc-header, .header-user, .user-info, .head-portrait, [class*='avatar'], [class*='account-name']");
+        if (hasLogin && !hasUser) return false;
+      }
+      return true;
+    },
     // AGC 正文在同源 iframe 里，Element UI：.el-dialog / .el-radio / .el-checkbox / .el-button。
     // 「一键获取密钥」按 flow 顺序跑；弹窗上的「确认」留给用户，之后抓下载 → 自动保存验证。
     flow: ["open-create"],
     actions: {
       "open-create": async (h) => {
+        if (/login|id\d*\.cloud\.huawei\.com|portal\/loginAuth/i.test(location.href)) {
+          throw new Error("检测到您尚未登录华为开发者账号，请先完成登录后再获取密钥。");
+        }
         let dlg = h.byText(".el-dialog", /创建Service Account/);
         if (!dlg) {
           const btn = h.byText("button", /^创建$/);
@@ -159,14 +172,30 @@ const APKGO_RECIPES = [
       }
       return out;
     },
+    isLoggedIn: async (h) => {
+      if (/login|account\.xiaomi\.com/i.test(location.href)) return false;
+      const phMatch = document.cookie.match(/mideveloper_ph=([^;]+)/);
+      const uidMatch = document.cookie.match(/\buserId=([^;]+)/);
+      if (!phMatch || !uidMatch) {
+        for (const doc of h.docs()) {
+          const hasLogin = [...doc.querySelectorAll("a, button, span")].some((el) => /^登录$/.test(h.textOf(el).trim()) && el.getClientRects().length);
+          const hasUser = doc.querySelector(".user-name, .user-info, [class*='avatar'], .logout");
+          if (hasLogin && !hasUser) return false;
+        }
+      }
+      return true;
+    },
     flow: ["fetch-key"],
     actions: {
       "fetch-key": async (h) => {
-        // 1. 调取邮箱
+        // 1. 登录检查与调取邮箱
+        const phMatch = document.cookie.match(/mideveloper_ph=([^;]+)/);
+        const uidMatch = document.cookie.match(/\buserId=([^;]+)/);
+        if (/login|account\.xiaomi\.com/i.test(location.href) || (!phMatch && !uidMatch && !h.draft.config.email)) {
+          throw new Error("检测到您尚未登录小米开放平台，请先登录开发者账号后再获取密钥。");
+        }
         if (!h.draft.config.email) {
           try {
-            const phMatch = document.cookie.match(/mideveloper_ph=([^;]+)/);
-            const uidMatch = document.cookie.match(/\buserId=([^;]+)/);
             if (phMatch && uidMatch) {
               const url = `/pltapi/uiue/user?edit=1&mideveloper_ph=${encodeURIComponent(phMatch[1])}&userId=${encodeURIComponent(uidMatch[1])}`;
               const r = await fetch(url, { credentials: "include" });
@@ -235,34 +264,34 @@ const APKGO_RECIPES = [
   {
     id: "oppo", cn: "OPPO", product: "OPPO 开放平台",
     hostRe: /(^|\.)open\.oppomobile\.com$/,
-    console: "https://open.oppomobile.com/new/api/myapi",
+    console: "https://open.oppomobile.com/new/ecological/app",
     noManual: true,
     hideWizardFields: true,
     progressOrder: ["goto", "filling", "saving", "done"],
     progressLabels: { filling: "自动获取 Client ID 与 Secret", saving: "保存到 apkgo 并验证" },
-    wizardHint: "助手会自动在「我的API」中获取服务端应用，提取 Client ID 和 Secret，并自动保存与验证。",
+    wizardHint: "助手会直接通过官方接口获取或创建服务端应用，提取 Client ID 和 Secret，并自动保存与验证。",
     doneBtnText: "重新获取并保存",
     doneHint: "已自动保存并验证 OPPO 开放平台凭据。",
     prereq: [
       "请登录 OPPO 开放平台开发者账号（主账号或管理员）",
-      "自动在「我的API」获取或创建服务端应用并提取 Client ID 和 Secret",
+      "自动通过官方接口获取或新建服务端应用并提取 Client ID 和 Secret",
     ],
     steps: [
       { t: "登录 OPPO 开放平台", d: "用主账号或管理员账号。" },
-      { t: "进入「我的API」页面", d: "https://open.oppomobile.com/new/api/myapi" },
-      { t: "自动获取或新建服务端应用", d: "自动提取 Client ID 和 Client Secret 并保存到 apkgo 验证。" },
+      { t: "进入「生态应用」管理页", d: "https://open.oppomobile.com/new/ecological/app" },
+      { t: "一键获取服务端应用密钥", d: "直接通过后台接口获取 Client ID 和 Secret，并保存到 apkgo 验证。" },
     ],
     fields: [
       { key: "client_id", label: "Client ID", kind: "text", hints: [/client[\s_-]*id/i, /客户端\s*ID/i], pattern: /^\d{4,}$/, required: true },
       { key: "client_secret", label: "Client Secret", kind: "secret", hints: [/client[\s_-]*secret/i, /密钥|secret/i], pattern: /^[A-Za-z0-9]{16,}$/, required: true },
     ],
-    detect: async (h) => {
+    detect: async () => {
       const out = {};
       try {
-        const res = await fetch("/myapi/server/app-list", {
+        const res = await fetch("https://open.oppomobile.com/myapi/server/app-list", {
           method: "POST",
           headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
-          body: "client_type=6&page=1&limit=10&service_id=",
+          body: "client_type=6&page=1&limit=20&service_id=",
           credentials: "include",
         });
         if (res.ok) {
@@ -277,26 +306,32 @@ const APKGO_RECIPES = [
           }
         }
       } catch { /* ignore */ }
-
-      for (const doc of h.docs()) {
-        const rows = doc.querySelectorAll(".el-table__row, .ant-table-row, tr, [role='row']");
-        for (const row of rows) {
-          const text = (row.innerText || row.textContent || "").replace(/\s+/g, " ");
-          const idMatch = text.match(/\b(\d{6,22})\b/);
-          const secretMatch = text.match(/\b([a-fA-F0-9]{32,64})\b/);
-          if (idMatch && !out.client_id) out.client_id = idMatch[1];
-          if (secretMatch && !out.client_secret) out.client_secret = secretMatch[1];
-        }
-      }
       return out;
+    },
+    isLoggedIn: async (h) => {
+      if (/login|passport|cas\./i.test(location.href)) return false;
+      const ck = document.cookie || "";
+      if (ck.includes("isLogin=0")) return false;
+      if (ck.includes("isLogin=1") || ck.includes("OPENPLATLOGIN=1") || ck.includes("OPPOSID=")) return true;
+      for (const doc of h.docs()) {
+        if (doc.querySelector("#login_form, .login-container, form[action*='login']")) return false;
+        const hasLogin = [...doc.querySelectorAll("a, button, span")].some((el) => /^登录$/.test(h.textOf(el).trim()) && el.getClientRects().length);
+        const hasUser = doc.querySelector(".user-name, .user-info, [class*='avatar'], .header-user, .store-user, .logout");
+        if (hasLogin && !hasUser) return false;
+      }
+      return true;
     },
     flow: ["fetch-key"],
     actions: {
       "fetch-key": async (h) => {
-        // ---- 方式 1：直接调用 OPPO 开放平台后台官方接口（极速且 100% 稳定） ----
+        if (/login|passport|cas\./i.test(location.href) || (document.cookie && document.cookie.includes("isLogin=0"))) {
+          throw new Error("检测到您尚未登录 OPPO 开放平台，请先登录开发者账号后再获取密钥。");
+        }
+
+        // 直接通过官方接口获取服务端应用列表
         const listServerApps = async () => {
           try {
-            const res = await fetch("/myapi/server/app-list", {
+            const res = await fetch("https://open.oppomobile.com/myapi/server/app-list", {
               method: "POST",
               headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
               body: "client_type=6&page=1&limit=20&service_id=",
@@ -314,7 +349,7 @@ const APKGO_RECIPES = [
 
         const addServerApp = async (name) => {
           try {
-            const res = await fetch("/myapi/server/app-add", {
+            const res = await fetch("https://open.oppomobile.com/myapi/server/app-add", {
               method: "POST",
               headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
               body: `client_name=${encodeURIComponent(name)}&client_type=&id=`,
@@ -341,11 +376,11 @@ const APKGO_RECIPES = [
         }
 
         // 仅在完全没有服务端应用时，才通过接口自动创建一个应用
-        if (!serverApps || serverApps.length === 0) {
+        if (serverApps && serverApps.length === 0) {
           const appName = "apkgo";
           const added = await addServerApp(appName);
           if (added) {
-            await h.wait(400);
+            await h.wait(500);
             serverApps = await listServerApps();
             const target = (serverApps && serverApps.find((r) => r.client_name === appName)) || (serverApps && serverApps[0]);
             if (target && target.client_id && target.client_secret) {
@@ -356,241 +391,19 @@ const APKGO_RECIPES = [
           }
         }
 
-        // ---- 方式 2：DOM 交互兜底（如本地离线测试环境） ----
-        // 查找页面或弹窗表格中的 client_id 和 client_secret
-        const findCredentials = async () => {
-          for (const doc of h.docs()) {
-            // 1. 优先按表格行检查（服务端应用列表每行包含名称、id、密钥）
-            const rows = doc.querySelectorAll(".el-table__row, .ant-table-row, tr, [role='row']");
-            for (const row of rows) {
-              if (!row.getClientRects().length && !row.offsetWidth) continue;
-              let text = (row.innerText || row.textContent || "").replace(/\s+/g, " ");
-              const idMatch = text.match(/\b(\d{6,22})\b/);
-              let secretMatch = text.match(/\b([a-fA-F0-9]{32,64})\b/);
-
-              // 如果找到 ID 但密钥被掩码（例如 66********************），点击小眼睛图标揭示明文
-              if (idMatch && !secretMatch) {
-                const eyeBtn = row.querySelector(
-                  ".co-icon-view, [class*='co-icon-view'], [class*='view'], [class*='eye'], .anticon-eye, .el-icon-view, .copybtn i, i.poninter-btn"
-                );
-                if (eyeBtn) {
-                  h.highlight(eyeBtn);
-                  eyeBtn.click();
-                  await h.wait(400); // 等待 Vue 响应式数据更新明文
-                  text = (row.innerText || row.textContent || "").replace(/\s+/g, " ");
-                  secretMatch = text.match(/\b([a-fA-F0-9]{32,64})\b/);
-                }
-              }
-
-              if (idMatch && secretMatch) {
-                // 勾选该行多选框
-                const checkbox = row.querySelector(".el-checkbox, input[type='checkbox'], .el-checkbox__inner");
-                if (checkbox && !checkbox.classList.contains("is-checked") && !checkbox.checked) {
-                  checkbox.click();
-                }
-                return { clientId: idMatch[1], clientSecret: secretMatch[1], row };
-              }
-            }
-
-            // 2. 检查所有输入框或文本域
-            let foundId = "";
-            let foundSecret = "";
-            for (const inp of doc.querySelectorAll("input, textarea")) {
-              const v = (inp.value || "").trim();
-              if (/^\d{6,22}$/.test(v) && !foundId) foundId = v;
-              if (/^[a-fA-F0-9]{32,64}$/.test(v) && !foundSecret) foundSecret = v;
-            }
-            if (foundId && foundSecret) {
-              return { clientId: foundId, clientSecret: foundSecret };
-            }
-
-            // 3. 兜底扫描页面文本（支持 Client ID: xxx 这种键值对表格）
-            const bodyText = (doc.body && doc.body.innerText) || "";
-            const idM = bodyText.match(/(?:client[_\s-]*id|客户端\s*id)[\s:=：]+(\d{6,22})/i) || bodyText.match(/\b(\d{6,22})\b/);
-            const secM = bodyText.match(/(?:client[_\s-]*secret|密钥|secret)[\s:=：]+([a-fA-F0-9]{32,64})/i) || bodyText.match(/\b([a-fA-F0-9]{32,64})\b/);
-            if (idM && secM) {
-              return { clientId: idM[1], clientSecret: secM[1] };
-            }
-          }
-          return null;
-        };
-
-        // 寻找专门的「新建应用」弹窗辅助函数
-        const getCreateModal = () => {
-          const ms = [...document.querySelectorAll(".el-dialog, .ant-modal, [role='dialog'], .modal")]
-            .filter((m) => m.getClientRects().length || m.offsetWidth);
-          return ms.find((m) => {
-            const titleEl = m.querySelector(".el-dialog__title, .ant-modal-title, .title, h1, h2, h3, h4");
-            const titleText = titleEl ? (titleEl.innerText || titleEl.textContent || "").trim() : "";
-            if (/新建应用/.test(titleText)) return true;
-            return /新建应用/.test(m.innerText || "") && !/选择应用/.test(titleText);
-          }) || null;
-        };
-
-        let activeModal = getCreateModal();
-
-        // 步骤 1：如果「新建应用」没打开，先在当前页面/弹窗中检查是否已有现成凭证
-        let creds = (!activeModal && !h.isReset) ? await findCredentials() : null;
-
-        if (!creds && !activeModal) {
-          // 若弹窗未打开，看是否有「选择应用」或「切换应用」按钮
-          const chooseBtn = h.byText("button, a, div, span", /^(选择应用|切换应用)$/);
-          const hasDialog = [...document.querySelectorAll(".el-dialog, .ant-modal, [role='dialog'], .modal")].some((d) => d.getClientRects().length);
-          if (chooseBtn && !hasDialog) {
-            chooseBtn.click();
-            await h.wait(800);
-          }
-
-          // 切换到「服务端应用」标签（OPPO 的组件是 .el-radio-button）
-          const serverTab = h.byText(".el-radio-button, button, a, div, span, li, .el-tabs__item", /^(服务端应用|服务器应用)$/) ||
-                            h.byText("*", /^服务端应用$/);
-          if (serverTab) {
-            serverTab.click();
-            await h.wait(1200); // 留出充足时间等待服务端应用列表异步加载
-          }
-
-          // 切换标签后再次检查是否有现成应用（异步请求完成后可能直接出现）
-          if (!h.isReset) {
-            creds = (await h.waitFor(async () => await findCredentials(), 3000)) || await findCredentials();
+        // 兜底（如本地离线测试环境，纯文本匹配，不做任何 UI 操作）
+        for (const doc of h.docs()) {
+          const text = (doc.body && doc.body.innerText) || "";
+          const idMatch = text.match(/\b(\d{6,22})\b/);
+          const secretMatch = text.match(/\b([a-fA-F0-9]{32,64})\b/);
+          if (idMatch && secretMatch) {
+            h.draft.config.client_id = idMatch[1];
+            h.draft.config.client_secret = secretMatch[1];
+            return `已获取凭据！正在保存并验证…`;
           }
         }
 
-        // 步骤 2：无现成应用、处于重置模式或「新建应用」已打开时，创建新应用
-        if (!creds) {
-          const existingIds = new Set();
-          for (const doc of h.docs()) {
-            const matches = (doc.body.innerText || "").match(/\b\d{6,22}\b/g) || [];
-            matches.forEach((id) => existingIds.add(id));
-          }
-
-          let modal = activeModal || getCreateModal();
-          if (!modal) {
-            // OPPO 实际类名是 add-newserve
-            const createBtn = modal?.querySelector(".add-newserve") ||
-                              h.byText("button, a, div, span", /^新建应用\s*\+?$/) ||
-                              h.byText("button, a, div, span", /新建应用/);
-            if (!createBtn) {
-              throw new Error("未找到「新建应用」按钮，请确认已在「我的API」页面并处于登录状态。");
-            }
-            createBtn.click();
-            modal = await h.waitFor(() => getCreateModal(), 4000);
-          }
-
-          if (!modal) {
-            throw new Error("未能定位到「新建应用」弹窗，请检查页面状态。");
-          }
-
-          // 步骤 A：在「新建应用」弹窗中，明确点选「服务端应用」单选
-          const selectServerRadio = async () => {
-            const targets = [...modal.querySelectorAll(".el-radio, .ant-radio-wrapper, label, div, span")]
-              .filter((el) => /服务端应用/.test(h.textOf(el).trim()) && (el.offsetWidth > 0 || el.getClientRects().length));
-
-            for (const el of targets) {
-              const container = el.closest(".el-radio, .ant-radio-wrapper, label") || el;
-              const inner = container.querySelector(".el-radio__inner, .ant-radio-inner, .el-radio__label, span") || el;
-              const inp = container.querySelector("input[type='radio']");
-
-              h.highlight(container);
-
-              inner.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window }));
-              inner.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, view: window }));
-              inner.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
-              inner.click();
-
-              container.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
-              container.click();
-
-              if (inp) {
-                inp.checked = true;
-                inp.dispatchEvent(new Event("input", { bubbles: true }));
-                inp.dispatchEvent(new Event("change", { bubbles: true }));
-              }
-            }
-          };
-
-          // 寻找「应用名称」输入框
-          const findNameInput = () => {
-            const formItems = [...modal.querySelectorAll(".el-form-item, .ant-form-item, tr, div")];
-            for (const fi of formItems) {
-              const label = fi.querySelector(".el-form-item__label, .ant-form-item-label, label, span");
-              if (label && /应用名称/.test(h.textOf(label))) {
-                const inp = fi.querySelector("input:not([type='hidden'])");
-                if (inp && (inp.offsetWidth > 0 || inp.getClientRects().length)) return inp;
-              }
-            }
-            const nameInp = modal.querySelector("input[placeholder*='服务器应用名称'], input[placeholder*='名称'], input[name*='name']");
-            if (nameInp && (nameInp.offsetWidth > 0 || nameInp.getClientRects().length)) return nameInp;
-            return null;
-          };
-
-          // 强制触发一次切换到服务端应用
-          await selectServerRadio();
-          await h.wait(500);
-
-          // 循环直到「应用名称」输入框就绪
-          let nameInput = findNameInput();
-          if (!nameInput) {
-            nameInput = await h.waitFor(async () => {
-              const inp = findNameInput();
-              if (inp) return inp;
-              await selectServerRadio();
-              return null;
-            }, 4000);
-          }
-
-          if (!nameInput) {
-            throw new Error("未能成功选择「服务端应用」或未展开「应用名称」输入框，请在弹窗中点选「服务端应用」。");
-          }
-
-          // 步骤 B：填名称（必须同时触发 input、change 与 InputEvent 保证 Vue 校验更新解禁确定按钮）
-          const appName = h.isReset ? `apkgo_${Date.now().toString(36).slice(-4)}` : "apkgo";
-          nameInput.focus();
-          h.highlight(nameInput);
-          h.setInput(nameInput, appName);
-          nameInput.dispatchEvent(new InputEvent("input", { bubbles: true, data: appName, inputType: "insertText" }));
-          nameInput.dispatchEvent(new Event("input", { bubbles: true }));
-          nameInput.dispatchEvent(new Event("change", { bubbles: true }));
-          await h.wait(800); // 留出让用户肉眼可见的节奏
-
-          // 步骤 C：然后再确定
-          const confirmBtn = await h.waitFor(() => {
-            const btns = [...modal.querySelectorAll(".footer-right button, .el-dialog__footer button, button, a, span")]
-              .filter((b) => (b.offsetWidth > 0 || b.getClientRects().length) && b.style.display !== "none");
-            const b = btns.find((x) => /^确定$/.test(h.textOf(x).trim()));
-            if (b && !b.disabled && !b.classList.contains("is-disabled")) return b;
-            // 若仍处于 disabled，再次激活输入事件
-            if (nameInput) {
-              nameInput.dispatchEvent(new Event("input", { bubbles: true }));
-              nameInput.dispatchEvent(new Event("change", { bubbles: true }));
-            }
-            return null;
-          }, 3000) || modal.querySelector(".footer-right button.el-button--primary");
-
-          if (!confirmBtn) {
-            throw new Error("在「新建应用」弹窗中未找到「确定」按钮。");
-          }
-
-          h.highlight(confirmBtn);
-          await h.wait(600); // 绿框高亮并停顿，让用户清晰看到即将确认
-          confirmBtn.click();
-          await h.wait(2000); // 等待新建提交并关闭新建弹窗
-
-          // 等待新应用出现在列表中
-          creds = (await h.waitFor(async () => {
-            const c = await findCredentials();
-            if (!c) return null;
-            if (h.isReset && existingIds.has(c.clientId)) return null;
-            return c;
-          }, 10000)) || await findCredentials();
-        }
-
-        if (!creds || !creds.clientId || !creds.clientSecret) {
-          throw new Error("未能自动获取到 Client ID 与 Client Secret，请确认列表中已展示服务端应用。");
-        }
-
-        h.draft.config.client_id = creds.clientId;
-        h.draft.config.client_secret = creds.clientSecret;
-        return `已自动获取 Client ID（${creds.clientId}）与 Client Secret！正在保存并验证…`;
+        throw new Error("未能通过接口获取到 Client ID 与 Client Secret，请确认处于登录状态。");
       },
     },
   },

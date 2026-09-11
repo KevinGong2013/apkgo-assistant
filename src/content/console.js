@@ -522,14 +522,43 @@
   }
 
   // 一键获取 = 按配方的 flow 依次跑 actions；不在入口页就先跳过去，落地后接着跑
-  // （标记放 session）。流程里唯一留给用户的是后台弹窗上的「确认」——那一下真正
-  // 在对方账号里创建密钥，扩展不替用户点。之后下载抓取 → 保存 → 验证自动完成。
+  async function checkLogin() {
+    const url = location.href;
+    if (/login|passport|account\.xiaomi\.com|id\d*\.cloud\.huawei\.com|portal\/loginAuth/i.test(url)) {
+      return false;
+    }
+    for (const d of docs()) {
+      if (d.querySelector("#login_form, .login-container, form[action*='login']")) {
+        return false;
+      }
+    }
+    if (typeof recipe.isLoggedIn === "function") {
+      try {
+        return await recipe.isLoggedIn({ docs, byText, textOf, draft });
+      } catch { /* ignore */ }
+    }
+    return true;
+  }
+
   let autoSave = false;
   async function oneClick() {
     const flow = recipe.flow || [];
     if (!flow.length) return;
     const isReset = stage === "done";
     result = null;
+
+    // 预检：如果尚未登录，提醒用户先登录开发者账号
+    const loggedIn = await checkLogin();
+    if (!loggedIn) {
+      result = {
+        kind: "warn",
+        html: `检测到您尚未登录 <b>${esc(recipe.cn)} 开放平台</b>，请先登录开发者账号后再获取密钥。`
+      };
+      setStage("error");
+      showNotice(`请先登录 ${esc(recipe.cn)} 开放平台开发者账号。`);
+      return;
+    }
+
     if (isReset) {
       for (const f of recipe.fields) delete draft.config[f.key];
       delete draft.config.private_key;
