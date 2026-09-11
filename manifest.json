@@ -1,0 +1,62 @@
+{
+  "manifest_version": 3,
+  "name": "apkgo 助手",
+  "short_name": "apkgo 助手",
+  "version": "0.1.0",
+  "description": "在华为、小米、OPPO、vivo、荣耀、应用宝等开放平台后台里带你找到 API 密钥，一键采集并保存到 apkgo cloud 验证。开源，只连 apkgo。",
+  "minimum_chrome_version": "116",
+  "icons": { "16": "icons/16.png", "32": "icons/32.png", "48": "icons/48.png", "128": "icons/128.png" },
+  "action": {
+    "default_title": "apkgo 助手",
+    "default_popup": "src/popup/popup.html",
+    "default_icon": { "16": "icons/16.png", "32": "icons/32.png" }
+  },
+  "background": { "service_worker": "src/background.js" },
+  "permissions": ["storage"],
+  "host_permissions": [
+    "https://developer.huawei.com/*",
+    "https://dev.mi.com/*",
+    "https://dev.xiaomi.com/*",
+    "https://open.oppomobile.com/*",
+    "https://dev.vivo.com.cn/*",
+    "https://developer.honor.com/*",
+    "https://developer.hihonor.com/*",
+    "https://open.qq.com/*",
+    "https://*.open.qq.com/*",
+    "https://open.flyme.cn/*",
+    "https://seller.samsungapps.com/*",
+    "https://appstoreconnect.apple.com/*",
+    "https://play.google.com/*",
+    "https://apkgo.baici.tech/*",
+    "http://localhost/*"
+  ],
+  "optional_host_permissions": ["https://*/*", "http://*/*"],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://developer.huawei.com/*",
+        "https://dev.mi.com/*",
+        "https://dev.xiaomi.com/*",
+        "https://open.oppomobile.com/*",
+        "https://dev.vivo.com.cn/*",
+        "https://developer.honor.com/*",
+        "https://developer.hihonor.com/*",
+        "https://open.qq.com/*",
+        "https://*.open.qq.com/*",
+        "https://open.flyme.cn/*",
+        "https://seller.samsungapps.com/*",
+        "https://appstoreconnect.apple.com/*",
+        "https://play.google.com/*"
+      ],
+      "js": ["src/recipes.js", "src/shared.js", "src/content/panel-style.js", "src/content/console.js"],
+      "run_at": "document_idle",
+      "all_frames": false
+    },
+    {
+      "matches": ["https://apkgo.baici.tech/*", "http://localhost/*"],
+      "js": ["src/content/bridge.js"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ]
+}

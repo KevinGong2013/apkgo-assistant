@@ -1,0 +1,29 @@
+# 打 tag（v0.1.0）就出一个 Release：可复现 zip + sha256。
+# 商店上架用的就是这个 zip；任何人 clone 后跑 python3 scripts/build.py 能得到同样的字节。
+name: release
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: Syntax check
+        run: |
+          python3 -c "import json; json.load(open('manifest.json'))"
+          for f in $(find src -name '*.js'); do node --check "$f"; done
+      - name: Build reproducible zip
+        run: python3 scripts/build.py --check-tag
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.zip
+            dist/*.sha256
+          body: |
+            可复现构建：clone 本仓库，`python3 scripts/build.py`，对比 `.sha256`。
+            手动安装：解压 zip → Chrome/Edge 打开 `chrome://extensions` → 开发者模式 → 加载已解压的扩展程序。
