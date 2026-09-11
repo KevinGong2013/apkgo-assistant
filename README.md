@@ -62,6 +62,19 @@ python3 scripts/build.py   # 打 zip 到 dist/
 - `src/background.js` — 唯一发网络请求的地方。
 - `src/popup/` — 工具栏弹窗：连接状态、打开面板、前往后台。
 
+## 发布到商店
+
+首发要在两家后台手动做一次（注册开发者、建条目、填商店列表和隐私表单、传截图），材料都在 [`store/listing.md`](store/listing.md)。之后每个版本全自动：打 tag → Release 出 zip → [`publish.yml`](.github/workflows/publish.yml) 把同一个 zip 传到 Chrome Web Store 和 Edge Add-ons 并提交审核。
+
+一次性配置（在本机跑，拿到的值填进仓库 Secrets）：
+
+```bash
+# Chrome：Google Cloud 控制台建一个 OAuth「桌面应用」客户端，然后
+npx publish-browser-extension@3 init     # 引导你完成授权，输出 CHROME_REFRESH_TOKEN 等
+# Edge：Partner Center → 发布 API → 生成 API key，得到 EDGE_PRODUCT_ID / EDGE_CLIENT_ID / EDGE_API_KEY
+gh secret set CHROME_EXTENSION_ID   # 依次把 7 个值设进去
+```
+
 ## 许可证
 
 MIT

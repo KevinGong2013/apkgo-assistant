@@ -1,0 +1,49 @@
+# 商店自动发布：Release 发出来后，把同一个 zip 传到 Chrome Web Store 和 Edge Add-ons 并提交审核。
+#
+# 首发必须在两家后台手动做一次（注册开发者、建条目、填商店列表/隐私表单/截图，
+# 见 store/listing.md）。之后每个版本靠这里全自动。需要的仓库 Secrets：
+#   Chrome：CHROME_EXTENSION_ID, CHROME_CLIENT_ID, CHROME_CLIENT_SECRET, CHROME_REFRESH_TOKEN
+#           （Google Cloud 建 OAuth 桌面客户端，`npx publish-browser-extension init` 一次性换 refresh token）
+#   Edge：  EDGE_PRODUCT_ID, EDGE_CLIENT_ID, EDGE_API_KEY
+#           （Partner Center → Publish API → 生成 API key）
+# 没配 Secrets 的那家会被跳过，不会失败。
+name: publish
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "要发布的 Release tag，如 v0.1.0"
+        required: true
+permissions:
+  contents: read
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "20" }
+      - name: Download release zip
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: |
+          gh release download "$TAG" --pattern '*.zip' --dir dist
+          ls -la dist
+      - name: Publish to Chrome Web Store
+        if: ${{ secrets.CHROME_EXTENSION_ID != '' }}
+        env:
+          CHROME_EXTENSION_ID: ${{ secrets.CHROME_EXTENSION_ID }}
+          CHROME_CLIENT_ID: ${{ secrets.CHROME_CLIENT_ID }}
+          CHROME_CLIENT_SECRET: ${{ secrets.CHROME_CLIENT_SECRET }}
+          CHROME_REFRESH_TOKEN: ${{ secrets.CHROME_REFRESH_TOKEN }}
+        run: npx --yes publish-browser-extension@3 --chrome-zip dist/*.zip
+      - name: Publish to Edge Add-ons
+        if: ${{ secrets.EDGE_PRODUCT_ID != '' }}
+        env:
+          EDGE_PRODUCT_ID: ${{ secrets.EDGE_PRODUCT_ID }}
+          EDGE_CLIENT_ID: ${{ secrets.EDGE_CLIENT_ID }}
+          EDGE_API_KEY: ${{ secrets.EDGE_API_KEY }}
+        run: npx --yes publish-browser-extension@3 --edge-zip dist/*.zip
