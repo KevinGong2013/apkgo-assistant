@@ -257,6 +257,26 @@ const APKGO_RECIPES = [
     ],
     detect: async (h) => {
       const out = {};
+      try {
+        const res = await fetch("/myapi/server/app-list", {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
+          body: "client_type=6&page=1&limit=10&service_id=",
+          credentials: "include",
+        });
+        if (res.ok) {
+          const d = await res.json();
+          if (d && d.errno === 0 && d.data && Array.isArray(d.data.rows) && d.data.rows.length) {
+            const target = d.data.rows.find((r) => /^apkgo/i.test(r.client_name)) || d.data.rows[0];
+            if (target && target.client_id && target.client_secret) {
+              out.client_id = String(target.client_id);
+              out.client_secret = String(target.client_secret);
+              return out;
+            }
+          }
+        }
+      } catch { /* ignore */ }
+
       for (const doc of h.docs()) {
         const rows = doc.querySelectorAll(".el-table__row, .ant-table-row, tr, [role='row']");
         for (const row of rows) {
@@ -272,6 +292,70 @@ const APKGO_RECIPES = [
     flow: ["fetch-key"],
     actions: {
       "fetch-key": async (h) => {
+        // ---- 方式 1：直接调用 OPPO 开放平台后台官方接口（极速且 100% 稳定） ----
+        const listServerApps = async () => {
+          try {
+            const res = await fetch("/myapi/server/app-list", {
+              method: "POST",
+              headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
+              body: "client_type=6&page=1&limit=20&service_id=",
+              credentials: "include",
+            });
+            if (res.ok) {
+              const d = await res.json();
+              if (d && d.errno === 0 && d.data && Array.isArray(d.data.rows)) {
+                return d.data.rows;
+              }
+            }
+          } catch { /* ignore */ }
+          return null;
+        };
+
+        const addServerApp = async (name) => {
+          try {
+            const res = await fetch("/myapi/server/app-add", {
+              method: "POST",
+              headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
+              body: `client_name=${encodeURIComponent(name)}&client_type=&id=`,
+              credentials: "include",
+            });
+            if (res.ok) {
+              const d = await res.json();
+              return d && d.errno === 0;
+            }
+          } catch { /* ignore */ }
+          return false;
+        };
+
+        let serverApps = await listServerApps();
+
+        // 非重置模式下，若已存在现成服务端应用，直接使用
+        if (!h.isReset && serverApps && serverApps.length > 0) {
+          const target = serverApps.find((r) => /^apkgo/i.test(r.client_name)) || serverApps[0];
+          if (target && target.client_id && target.client_secret) {
+            h.draft.config.client_id = String(target.client_id);
+            h.draft.config.client_secret = String(target.client_secret);
+            return `已通过后台接口秒级获取应用「${target.client_name}」凭据！正在保存并验证…`;
+          }
+        }
+
+        // 重置模式或尚无应用时，直接调接口创建新应用
+        if (h.isReset || (serverApps && serverApps.length === 0)) {
+          const appName = h.isReset ? `apkgo_${Date.now().toString(36).slice(-4)}` : "apkgo";
+          const added = await addServerApp(appName);
+          if (added) {
+            await h.wait(400);
+            serverApps = await listServerApps();
+            const target = (serverApps && serverApps.find((r) => r.client_name === appName)) || (serverApps && serverApps[0]);
+            if (target && target.client_id && target.client_secret) {
+              h.draft.config.client_id = String(target.client_id);
+              h.draft.config.client_secret = String(target.client_secret);
+              return `已通过后台接口创建应用「${target.client_name}」并获取凭据！正在保存并验证…`;
+            }
+          }
+        }
+
+        // ---- 方式 2：DOM 交互兜底（如本地离线测试环境） ----
         // 查找页面或弹窗表格中的 client_id 和 client_secret
         const findCredentials = async () => {
           for (const doc of h.docs()) {
