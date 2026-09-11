@@ -386,64 +386,90 @@ const APKGO_RECIPES = [
             throw new Error("未能定位到「新建应用」弹窗，请检查页面状态。");
           }
 
-          // 确保选中「服务端应用」单选框（循环点击直到「应用名称」输入项渲染出来）
-          await h.waitFor(() => {
-            const hasNameInput = [...modal.querySelectorAll("input")].some(
-              (inp) => inp.getClientRects().length && !inp.disabled && !inp.readOnly &&
-                       (inp.placeholder?.includes("名称") || inp.name?.includes("name") || modal.innerText.includes("应用名称"))
-            );
-            if (hasNameInput) return true;
-
-            const targets = [...modal.querySelectorAll(".el-radio, .ant-radio-wrapper, label, span, div, input[type='radio']")]
-              .filter((el) => /服务端应用/.test(h.textOf(el).trim()) && el.getClientRects().length);
+          // 步骤 A：在「新建应用」弹窗中，明确点选「服务端应用」单选
+          const selectServerRadio = async () => {
+            const targets = [...modal.querySelectorAll(".el-radio, .ant-radio-wrapper, label, div, span")]
+              .filter((el) => /^服务端应用$/.test(h.textOf(el).trim()) && (el.offsetWidth > 0 || el.getClientRects().length));
 
             for (const el of targets) {
               const container = el.closest(".el-radio, .ant-radio-wrapper, label") || el;
-              const inp = container.querySelector("input[type='radio']") || (container.tagName === "INPUT" ? container : null);
-              if (inp) {
-                inp.checked = true;
-                inp.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
-                inp.dispatchEvent(new Event("change", { bubbles: true }));
-              }
+              const inner = container.querySelector(".el-radio__inner, .ant-radio-inner, .el-radio__label, span") || el;
+              const inp = container.querySelector("input[type='radio']");
+
+              h.highlight(container);
+
+              inner.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window }));
+              inner.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, view: window }));
+              inner.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
+              inner.click();
+
               container.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
               container.click();
-            }
-            return false;
-          }, 4000);
 
+              if (inp) {
+                inp.checked = true;
+                inp.dispatchEvent(new Event("input", { bubbles: true }));
+                inp.dispatchEvent(new Event("change", { bubbles: true }));
+              }
+            }
+          };
+
+          // 寻找「应用名称」输入框
+          const findNameInput = () => {
+            const formItems = [...modal.querySelectorAll(".el-form-item, .ant-form-item, tr, div")];
+            for (const fi of formItems) {
+              const label = fi.querySelector(".el-form-item__label, .ant-form-item-label, label, span");
+              if (label && /应用名称/.test(h.textOf(label))) {
+                const inp = fi.querySelector("input:not([type='hidden'])");
+                if (inp && (inp.offsetWidth > 0 || inp.getClientRects().length)) return inp;
+              }
+            }
+            const nameInp = modal.querySelector("input[placeholder*='名称'], input[name*='name'], input[placeholder*='输入应用名称']");
+            if (nameInp && (nameInp.offsetWidth > 0 || nameInp.getClientRects().length)) return nameInp;
+            return null;
+          };
+
+          // 强制触发一次切换到服务端应用
+          await selectServerRadio();
           await h.wait(500);
 
-          // 定位「应用名称」输入框
-          let nameInput = modal.querySelector("input[placeholder*='名称'], input[name*='name'], input[placeholder*='输入应用名称']");
+          // 循环直到「应用名称」输入框就绪
+          let nameInput = findNameInput();
           if (!nameInput) {
-            const labels = [...modal.querySelectorAll("label, .el-form-item__label, .ant-form-item-label, span, div")];
-            const nameLabel = labels.find((l) => /应用名称/.test(h.textOf(l).trim()) && l.getClientRects().length);
-            if (nameLabel) {
-              const formItem = nameLabel.closest(".el-form-item, .ant-form-item, tr, div");
-              if (formItem) nameInput = formItem.querySelector("input");
-            }
-          }
-          if (!nameInput) {
-            const inputs = [...modal.querySelectorAll("input:not([type='hidden']):not([type='radio']):not([type='checkbox'])")];
-            nameInput = inputs.find((i) => i.getClientRects().length && !i.disabled && !i.readOnly);
+            nameInput = await h.waitFor(async () => {
+              const inp = findNameInput();
+              if (inp) return inp;
+              await selectServerRadio();
+              return null;
+            }, 4000);
           }
 
-          if (nameInput) {
-            nameInput.focus();
-            const appName = h.isReset ? `apkgo_${Date.now().toString(36).slice(-4)}` : "apkgo";
-            h.setInput(nameInput, appName);
-            await h.wait(600);
+          if (!nameInput) {
+            throw new Error("未能成功选择「服务端应用」或未展开「应用名称」输入框，请在弹窗中点选「服务端应用」。");
           }
 
-          // 仅在「新建应用」弹窗内寻找并点击「确定」按钮
-          const confirmBtn = [...modal.querySelectorAll(".el-dialog__footer button, button, a, span")]
-            .find((b) => /^确定$/.test(h.textOf(b).trim()) && b.getClientRects().length && !b.disabled);
-          if (confirmBtn) {
-            h.highlight(confirmBtn);
-            await h.wait(400);
-            confirmBtn.click();
-            await h.wait(1500); // 等待新建提交并关闭新建弹窗
+          // 步骤 B：填名称
+          nameInput.focus();
+          h.highlight(nameInput);
+          const appName = h.isReset ? `apkgo_${Date.now().toString(36).slice(-4)}` : "apkgo";
+          h.setInput(nameInput, appName);
+          await h.wait(800); // 留出让用户肉眼可见的节奏
+
+          // 步骤 C：然后再确定
+          const confirmBtn = await h.waitFor(() => {
+            const btns = [...modal.querySelectorAll(".el-dialog__footer button, button, a, span")]
+              .filter((b) => (b.offsetWidth > 0 || b.getClientRects().length) && !b.disabled);
+            return btns.find((b) => /^确定$/.test(h.textOf(b).trim()));
+          }, 3000);
+
+          if (!confirmBtn) {
+            throw new Error("在「新建应用」弹窗中未找到「确定」按钮。");
           }
+
+          h.highlight(confirmBtn);
+          await h.wait(600); // 绿框高亮并停顿，让用户清晰看到即将确认
+          confirmBtn.click();
+          await h.wait(2000); // 等待新建提交并关闭新建弹窗
 
           // 等待新应用出现在列表中
           creds = (await h.waitFor(() => {
