@@ -323,11 +323,21 @@ const APKGO_RECIPES = [
           return null;
         };
 
-        // 步骤 1：检查「新建应用」弹窗是否已经处于打开状态
-        let activeModal = [...document.querySelectorAll(".el-dialog, .ant-modal, [role='dialog'], .modal")]
-          .find((m) => m.getClientRects().length && /新建应用/.test(m.innerText || ""));
+        // 寻找专门的「新建应用」弹窗辅助函数
+        const getCreateModal = () => {
+          const ms = [...document.querySelectorAll(".el-dialog, .ant-modal, [role='dialog'], .modal")]
+            .filter((m) => m.getClientRects().length);
+          return ms.find((m) => {
+            const titleEl = m.querySelector(".el-dialog__title, .ant-modal-title, .title, h1, h2, h3, h4");
+            const titleText = titleEl ? (titleEl.innerText || titleEl.textContent || "").trim() : "";
+            if (/新建应用/.test(titleText)) return true;
+            return /新建应用/.test(m.innerText || "") && !/选择应用/.test(titleText);
+          }) || null;
+        };
 
-        // 步骤 2：如果「新建应用」没打开，先在当前页面/弹窗中检查是否已有凭证
+        let activeModal = getCreateModal();
+
+        // 步骤 1：如果「新建应用」没打开，先在当前页面/弹窗中检查是否已有现成凭证
         let creds = (!activeModal && !h.isReset) ? findCredentials() : null;
 
         if (!creds && !activeModal) {
@@ -353,7 +363,7 @@ const APKGO_RECIPES = [
           }
         }
 
-        // 步骤 3：无现成应用、重置模式或「新建应用」已打开时，完成新建
+        // 步骤 2：无现成应用、处于重置模式或「新建应用」已打开时，创建新应用
         if (!creds) {
           const existingIds = new Set();
           for (const doc of h.docs()) {
@@ -361,32 +371,29 @@ const APKGO_RECIPES = [
             matches.forEach((id) => existingIds.add(id));
           }
 
-          if (!activeModal) {
+          let modal = activeModal || getCreateModal();
+          if (!modal) {
             const createBtn = h.byText("button, a, div, span", /^新建应用\s*\+?$/) ||
                               h.byText("button, a, div, span", /新建应用/);
             if (!createBtn) {
               throw new Error("未找到「新建应用」按钮，请确认已在「我的API」页面并处于登录状态。");
             }
             createBtn.click();
-            await h.wait(1000);
+            modal = await h.waitFor(() => getCreateModal(), 4000);
           }
 
-          // 获取当前最顶层的可见弹窗
-          const modal = (await h.waitFor(() => {
-            const ms = [...document.querySelectorAll(".el-dialog, .ant-modal, [role='dialog'], .modal")].filter((m) => m.getClientRects().length);
-            return ms[ms.length - 1] || null;
-          }, 3000)) || document;
+          if (!modal) {
+            throw new Error("未能定位到「新建应用」弹窗，请检查页面状态。");
+          }
 
           // 确保选中「服务端应用」单选框（循环点击直到「应用名称」输入项渲染出来）
-          const switched = await h.waitFor(() => {
-            // 检查应用名称输入框是否已经渲染出来
+          await h.waitFor(() => {
             const hasNameInput = [...modal.querySelectorAll("input")].some(
               (inp) => inp.getClientRects().length && !inp.disabled && !inp.readOnly &&
                        (inp.placeholder?.includes("名称") || inp.name?.includes("name") || modal.innerText.includes("应用名称"))
             );
             if (hasNameInput) return true;
 
-            // 寻找包含「服务端应用」文本的所有元素并触发点击与事件
             const targets = [...modal.querySelectorAll(".el-radio, .ant-radio-wrapper, label, span, div, input[type='radio']")]
               .filter((el) => /服务端应用/.test(h.textOf(el).trim()) && el.getClientRects().length);
 
@@ -425,17 +432,17 @@ const APKGO_RECIPES = [
             nameInput.focus();
             const appName = h.isReset ? `apkgo_${Date.now().toString(36).slice(-4)}` : "apkgo";
             h.setInput(nameInput, appName);
-            await h.wait(600); // 留出让用户肉眼可见的节奏
+            await h.wait(600);
           }
 
-          // 点击「确定」按钮
-          const confirmBtn = [...modal.querySelectorAll("button, a, span")]
+          // 仅在「新建应用」弹窗内寻找并点击「确定」按钮
+          const confirmBtn = [...modal.querySelectorAll(".el-dialog__footer button, button, a, span")]
             .find((b) => /^确定$/.test(h.textOf(b).trim()) && b.getClientRects().length && !b.disabled);
           if (confirmBtn) {
             h.highlight(confirmBtn);
             await h.wait(400);
             confirmBtn.click();
-            await h.wait(1500); // 等待提交完成
+            await h.wait(1500); // 等待新建提交并关闭新建弹窗
           }
 
           // 等待新应用出现在列表中
@@ -445,6 +452,15 @@ const APKGO_RECIPES = [
             if (h.isReset && existingIds.has(c.clientId)) return null;
             return c;
           }, 8000)) || findCredentials();
+        }
+
+        // 选中列表行单选框（若处于「选择应用」弹窗中）
+        if (creds && creds.row) {
+          const rowRadio = creds.row.querySelector("input[type='radio'], .el-radio, .ant-radio, .el-radio__inner, [class*='radio']");
+          if (rowRadio) {
+            rowRadio.click();
+            await h.wait(200);
+          }
         }
 
         // 兜底再次检查眼睛图标
