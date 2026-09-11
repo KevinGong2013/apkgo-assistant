@@ -94,19 +94,143 @@ const APKGO_RECIPES = [
   {
     id: "xiaomi", cn: "小米", product: "小米开放平台",
     hostRe: /(^|\.)dev\.(mi|xiaomi)\.com$/,
-    console: "https://dev.mi.com/",
-    prereq: ["请用主账号；团队子账号可能没有「自动发布」入口", "私钥每次「重置」都会变，重置后要重新采集", "第一次开通接口通常要联系小米客服"],
+    // 2026-09 实登核对：管理中心 → 应用服务 → 自动发布接口
+    console: "https://dev.mi.com/xiaomihyperos/console/app-services/auto-publish-api",
+    noManual: true,
+    hideWizardFields: true,
+    prereq: [
+      "请用主账号；团队子账号可能没有「自动发布」入口",
+      "私钥每次「重置」都会变，重置后要重新采集",
+      "公钥由 apkgo 内置，无需下载上传",
+    ],
+    doneBtnText: "重置私钥并重新保存",
+    doneHint: "小米仅支持一把私钥；重置后旧私钥失效，点击上方按钮将自动在后台重置并同步至 apkgo。",
+    wizardHint: "全自动流程：扩展会自动调取开发者邮箱并提取私钥（未生成时自动生成），直接保存并验证。",
+    progressOrder: ["goto", "filling", "saving", "done"],
+    progressLabels: {
+      filling: "自动获取邮箱与私钥",
+      saving: "保存到 apkgo 并验证",
+    },
     steps: [
-      { t: "登录小米开放平台 → 应用商店开发者站", d: "用主账号。" },
-      { t: "找到「自动发布接口」/「API 密钥」页", d: "在应用管理或账号设置附近；文档 pId=1134 有截图。" },
-      { t: "生成 / 重置私钥，下载公钥证书", d: "私钥是一串长字符，公钥证书是 .cer 或 .pem 文件。" },
-      { t: "在本面板填账号邮箱、私钥，并选中证书文件", d: "" },
+      { t: "登录小米开放平台 → 管理中心", d: "用主账号。" },
+      { t: "左侧菜单「应用服务 → 自动发布接口」", d: "直达接口配置页面。", action: "goto" },
+      { t: "获取邮箱与私钥，保存并验证", d: "扩展会自动从后台调取开发者邮箱并提取私钥。", action: "fetch-key" },
     ],
     fields: [
       { key: "email", label: "开发者账号邮箱", kind: "text", hints: [/邮箱|e-?mail|账号/i], pattern: /^[^\s@]+@[^\s@]+\.[^\s@]+$/, required: true },
       { key: "private_key", label: "私钥", kind: "secret", hints: [/私钥|private\s*key|password|密码/i], pattern: /^[A-Za-z0-9+/=_-]{16,}$/, required: true },
-      { key: "cert", label: "公钥证书文件（.cer / .pem）", kind: "file-b64", accept: ".cer,.pem,.crt", required: true },
     ],
+    preload: async () => {
+      try {
+        const phMatch = document.cookie.match(/mideveloper_ph=([^;]+)/);
+        const uidMatch = document.cookie.match(/\buserId=([^;]+)/);
+        if (!phMatch || !uidMatch) return null;
+        const url = `/pltapi/uiue/user?edit=1&mideveloper_ph=${encodeURIComponent(phMatch[1])}&userId=${encodeURIComponent(uidMatch[1])}`;
+        const r = await fetch(url, { credentials: "include" });
+        if (!r.ok) return null;
+        const d = await r.json();
+        const email = d && d.data && d.data.email;
+        if (email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { email };
+      } catch { /* ignore */ }
+      return null;
+    },
+    detect: async (h) => {
+      const out = {};
+      try {
+        const phMatch = document.cookie.match(/mideveloper_ph=([^;]+)/);
+        const uidMatch = document.cookie.match(/\buserId=([^;]+)/);
+        if (phMatch && uidMatch) {
+          const url = `/pltapi/uiue/user?edit=1&mideveloper_ph=${encodeURIComponent(phMatch[1])}&userId=${encodeURIComponent(uidMatch[1])}`;
+          const r = await fetch(url, { credentials: "include" });
+          if (r.ok) {
+            const d = await r.json();
+            if (d && d.data && d.data.email) out.email = d.data.email;
+          }
+        }
+      } catch { /* ignore */ }
+
+      for (const doc of h.docs()) {
+        const text = (doc.body && doc.body.innerText) || "";
+        const matches = text.match(/\b[a-zA-Z0-9]{40,64}\b/g) || [];
+        for (const m of matches) {
+          if (!/已生成|mideveloper|openplatform/i.test(m)) { out.private_key = m; break; }
+        }
+        if (out.private_key) break;
+      }
+      return out;
+    },
+    flow: ["fetch-key"],
+    actions: {
+      "fetch-key": async (h) => {
+        // 1. 调取邮箱
+        if (!h.draft.config.email) {
+          try {
+            const phMatch = document.cookie.match(/mideveloper_ph=([^;]+)/);
+            const uidMatch = document.cookie.match(/\buserId=([^;]+)/);
+            if (phMatch && uidMatch) {
+              const url = `/pltapi/uiue/user?edit=1&mideveloper_ph=${encodeURIComponent(phMatch[1])}&userId=${encodeURIComponent(uidMatch[1])}`;
+              const r = await fetch(url, { credentials: "include" });
+              if (r.ok) {
+                const d = await r.json();
+                if (d && d.data && d.data.email) h.draft.config.email = d.data.email;
+              }
+            }
+          } catch { /* ignore */ }
+        }
+        if (!h.draft.config.email) {
+          throw new Error("未能自动获取到开发者邮箱，请确认已登录小米开放平台。");
+        }
+
+        // 2. 查找页面上的私钥
+        const findKey = (exclude) => {
+          for (const doc of h.docs()) {
+            const text = (doc.body && doc.body.innerText) || "";
+            const matches = text.match(/\b[a-zA-Z0-9]{40,64}\b/g) || [];
+            for (const m of matches) {
+              if (!/已生成|mideveloper|openplatform/i.test(m) && m !== exclude) return m;
+            }
+            for (const inp of doc.querySelectorAll("input, textarea")) {
+              const v = (inp.value || inp.placeholder || "").trim();
+              if (/^[a-zA-Z0-9]{40,64}$/.test(v) && !/已生成/.test(v) && v !== exclude) return v;
+            }
+          }
+          return "";
+        };
+
+        let currentKey = findKey();
+        let key = currentKey;
+
+        // 如果明确是重置（isReset）或者页面上没有当前明文私钥，自动点击重置/生成
+        if (h.isReset || !key) {
+          const btn = h.byText("button, a, div, span", /^重置私钥$/) ||
+                      h.byText("button, a, div, span", /^生成私钥$/) ||
+                      h.byText("button, a", /重置私钥|生成私钥/);
+          if (btn) {
+            btn.click();
+            await h.wait(400);
+            for (const doc of h.docs()) {
+              const confirmBtn = [...doc.querySelectorAll(".el-dialog button, .el-message-box button, .ant-modal button, button")]
+                .find((b) => /^(确定|确认)$/.test(h.textOf(b).trim()) && b.getClientRects().length);
+              if (confirmBtn) { confirmBtn.click(); break; }
+            }
+            key = (await h.waitFor(() => {
+              const k = findKey(h.isReset ? currentKey : undefined);
+              return (h.isReset && currentKey) ? (k && k !== currentKey ? k : null) : k;
+            }, 5000)) || findKey();
+          }
+        }
+
+        if (!key) {
+          const btn = h.byText("button, a, div, span", /^(重置私钥|生成私钥)$/) || h.byText("button, a", /重置私钥|生成私钥/);
+          if (btn) h.highlight(btn);
+          const btnName = btn ? h.textOf(btn).trim() : "重置私钥";
+          throw new Error(`未能自动提取到私钥。请在页面上点击绿框高亮的「${btnName}」，然后再点「一键获取密钥」。`);
+        }
+
+        h.draft.config.private_key = key;
+        return `已自动获取邮箱（${h.draft.config.email}）与私钥！正在保存并验证…`;
+      },
+    },
   },
   {
     id: "oppo", cn: "OPPO", product: "OPPO 开放平台",
