@@ -323,61 +323,90 @@ const APKGO_RECIPES = [
           return null;
         };
 
-        // 步骤 1：若已有凭证且非重置模式，直接提取
-        let creds = !h.isReset ? findCredentials() : null;
+        // 步骤 1：检查「新建应用」弹窗是否已经处于打开状态
+        let activeModal = [...document.querySelectorAll(".el-dialog, .ant-modal, [role='dialog'], .modal")]
+          .find((m) => m.getClientRects().length && /新建应用/.test(m.innerText || ""));
 
-        if (!creds) {
+        // 步骤 2：如果「新建应用」没打开，先在当前页面/弹窗中检查是否已有凭证
+        let creds = (!activeModal && !h.isReset) ? findCredentials() : null;
+
+        if (!creds && !activeModal) {
           // 若弹窗未打开，看是否有「选择应用」或「切换应用」按钮
           const chooseBtn = h.byText("button, a, div, span", /^(选择应用|切换应用)$/);
           const hasDialog = [...document.querySelectorAll(".el-dialog, .ant-modal, [role='dialog'], .modal")].some((d) => d.getClientRects().length);
           if (chooseBtn && !hasDialog) {
             chooseBtn.click();
-            await h.wait(500);
+            await h.wait(800);
           }
 
-          // 步骤 2：切换到「服务端应用」标签
+          // 切换到「服务端应用」标签
           const serverTab = h.byText("button, a, div, span, li, .el-tabs__item, .ant-tabs-tab", /^(服务端应用|服务器应用)$/) ||
                             h.byText("*", /^服务端应用$/);
           if (serverTab) {
             serverTab.click();
-            await h.wait(600);
+            await h.wait(1200); // 留出充足时间等待服务端应用列表异步加载
           }
 
-          // 步骤 3：切换标签后再次检查是否有现成应用
+          // 切换标签后再次检查是否有现成应用（异步请求完成后可能直接出现）
           if (!h.isReset) {
-            creds = findCredentials();
+            creds = (await h.waitFor(() => findCredentials(), 2500)) || findCredentials();
           }
         }
 
-        // 步骤 4：无现成应用或重置模式下，点击「新建应用」并填写创建
+        // 步骤 3：无现成应用、重置模式或「新建应用」已打开时，完成新建
         if (!creds) {
-          // 记录当前已存在的 ID，重置时确保选取新建的应用
           const existingIds = new Set();
           for (const doc of h.docs()) {
             const matches = (doc.body.innerText || "").match(/\b\d{6,22}\b/g) || [];
             matches.forEach((id) => existingIds.add(id));
           }
 
-          const createBtn = h.byText("button, a, div, span", /^新建应用\s*\+?$/) ||
-                            h.byText("button, a, div, span", /新建应用/);
-          if (!createBtn) {
-            throw new Error("未找到「新建应用」按钮，请确认已在「我的API」页面并处于登录状态。");
-          }
-          createBtn.click();
-          await h.wait(800);
-
-          // 进入「新建应用」弹窗，选择「服务端应用」单选
-          const modals = [...document.querySelectorAll(".el-dialog, .ant-modal, [role='dialog'], .modal")].filter((m) => m.getClientRects().length);
-          const modal = modals[modals.length - 1] || document;
-
-          const radios = [...modal.querySelectorAll(".el-radio, .ant-radio-wrapper, label, div, span")];
-          const serverRadio = radios.find((el) => /^服务端应用$/.test(h.textOf(el).trim()) && el.getClientRects().length);
-          if (serverRadio) {
-            serverRadio.click();
-            await h.wait(300);
+          if (!activeModal) {
+            const createBtn = h.byText("button, a, div, span", /^新建应用\s*\+?$/) ||
+                              h.byText("button, a, div, span", /新建应用/);
+            if (!createBtn) {
+              throw new Error("未找到「新建应用」按钮，请确认已在「我的API」页面并处于登录状态。");
+            }
+            createBtn.click();
+            await h.wait(1000);
           }
 
-          // 填写应用名称（若重置则加随机后缀避免重名冲突）
+          // 获取当前最顶层的可见弹窗
+          const modal = (await h.waitFor(() => {
+            const ms = [...document.querySelectorAll(".el-dialog, .ant-modal, [role='dialog'], .modal")].filter((m) => m.getClientRects().length);
+            return ms[ms.length - 1] || null;
+          }, 3000)) || document;
+
+          // 确保选中「服务端应用」单选框（循环点击直到「应用名称」输入项渲染出来）
+          const switched = await h.waitFor(() => {
+            // 检查应用名称输入框是否已经渲染出来
+            const hasNameInput = [...modal.querySelectorAll("input")].some(
+              (inp) => inp.getClientRects().length && !inp.disabled && !inp.readOnly &&
+                       (inp.placeholder?.includes("名称") || inp.name?.includes("name") || modal.innerText.includes("应用名称"))
+            );
+            if (hasNameInput) return true;
+
+            // 寻找包含「服务端应用」文本的所有元素并触发点击与事件
+            const targets = [...modal.querySelectorAll(".el-radio, .ant-radio-wrapper, label, span, div, input[type='radio']")]
+              .filter((el) => /服务端应用/.test(h.textOf(el).trim()) && el.getClientRects().length);
+
+            for (const el of targets) {
+              const container = el.closest(".el-radio, .ant-radio-wrapper, label") || el;
+              const inp = container.querySelector("input[type='radio']") || (container.tagName === "INPUT" ? container : null);
+              if (inp) {
+                inp.checked = true;
+                inp.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
+                inp.dispatchEvent(new Event("change", { bubbles: true }));
+              }
+              container.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
+              container.click();
+            }
+            return false;
+          }, 4000);
+
+          await h.wait(500);
+
+          // 定位「应用名称」输入框
           let nameInput = modal.querySelector("input[placeholder*='名称'], input[name*='name'], input[placeholder*='输入应用名称']");
           if (!nameInput) {
             const labels = [...modal.querySelectorAll("label, .el-form-item__label, .ant-form-item-label, span, div")];
@@ -393,20 +422,23 @@ const APKGO_RECIPES = [
           }
 
           if (nameInput) {
+            nameInput.focus();
             const appName = h.isReset ? `apkgo_${Date.now().toString(36).slice(-4)}` : "apkgo";
             h.setInput(nameInput, appName);
-            await h.wait(300);
+            await h.wait(600); // 留出让用户肉眼可见的节奏
           }
 
-          // 点击「确定」创建
+          // 点击「确定」按钮
           const confirmBtn = [...modal.querySelectorAll("button, a, span")]
-            .find((b) => /^确定$/.test(h.textOf(b).trim()) && b.getClientRects().length);
+            .find((b) => /^确定$/.test(h.textOf(b).trim()) && b.getClientRects().length && !b.disabled);
           if (confirmBtn) {
+            h.highlight(confirmBtn);
+            await h.wait(400);
             confirmBtn.click();
-            await h.wait(1000);
+            await h.wait(1500); // 等待提交完成
           }
 
-          // 等待凭证渲染在列表中
+          // 等待新应用出现在列表中
           creds = (await h.waitFor(() => {
             const c = findCredentials();
             if (!c) return null;
