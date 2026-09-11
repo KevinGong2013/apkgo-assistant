@@ -273,29 +273,36 @@ const APKGO_RECIPES = [
     actions: {
       "fetch-key": async (h) => {
         // 查找页面或弹窗表格中的 client_id 和 client_secret
-        const findCredentials = () => {
+        const findCredentials = async () => {
           for (const doc of h.docs()) {
-            // 1. 优先按表格行检查（服务端应用列表每行包含名称、client_id、client_secret）
+            // 1. 优先按表格行检查（服务端应用列表每行包含名称、id、密钥）
             const rows = doc.querySelectorAll(".el-table__row, .ant-table-row, tr, [role='row']");
             for (const row of rows) {
-              if (!row.getClientRects().length) continue;
+              if (!row.getClientRects().length && !row.offsetWidth) continue;
               let text = (row.innerText || row.textContent || "").replace(/\s+/g, " ");
               const idMatch = text.match(/\b(\d{6,22})\b/);
               let secretMatch = text.match(/\b([a-fA-F0-9]{32,64})\b/);
 
-              // 如果找到 ID 但密钥被掩码，尝试点击行内的眼睛图标揭示明文
+              // 如果找到 ID 但密钥被掩码（例如 66********************），点击小眼睛图标揭示明文
               if (idMatch && !secretMatch) {
                 const eyeBtn = row.querySelector(
-                  ".anticon-eye, .anticon-eye-invisible, .el-icon-view, .el-icon-hide, i[class*='eye'], svg[class*='eye'], [title*='显示'], [title*='查看'], [aria-label*='eye'], [class*='eye'], [class*='view']"
+                  ".co-icon-view, [class*='co-icon-view'], [class*='view'], [class*='eye'], .anticon-eye, .el-icon-view, .copybtn i, i.poninter-btn"
                 );
                 if (eyeBtn) {
+                  h.highlight(eyeBtn);
                   eyeBtn.click();
-                  const newText = (row.innerText || row.textContent || "").replace(/\s+/g, " ");
-                  secretMatch = newText.match(/\b([a-fA-F0-9]{32,64})\b/);
+                  await h.wait(400); // 等待 Vue 响应式数据更新明文
+                  text = (row.innerText || row.textContent || "").replace(/\s+/g, " ");
+                  secretMatch = text.match(/\b([a-fA-F0-9]{32,64})\b/);
                 }
               }
 
               if (idMatch && secretMatch) {
+                // 勾选该行多选框
+                const checkbox = row.querySelector(".el-checkbox, input[type='checkbox'], .el-checkbox__inner");
+                if (checkbox && !checkbox.classList.contains("is-checked") && !checkbox.checked) {
+                  checkbox.click();
+                }
                 return { clientId: idMatch[1], clientSecret: secretMatch[1], row };
               }
             }
@@ -326,7 +333,7 @@ const APKGO_RECIPES = [
         // 寻找专门的「新建应用」弹窗辅助函数
         const getCreateModal = () => {
           const ms = [...document.querySelectorAll(".el-dialog, .ant-modal, [role='dialog'], .modal")]
-            .filter((m) => m.getClientRects().length);
+            .filter((m) => m.getClientRects().length || m.offsetWidth);
           return ms.find((m) => {
             const titleEl = m.querySelector(".el-dialog__title, .ant-modal-title, .title, h1, h2, h3, h4");
             const titleText = titleEl ? (titleEl.innerText || titleEl.textContent || "").trim() : "";
@@ -338,7 +345,7 @@ const APKGO_RECIPES = [
         let activeModal = getCreateModal();
 
         // 步骤 1：如果「新建应用」没打开，先在当前页面/弹窗中检查是否已有现成凭证
-        let creds = (!activeModal && !h.isReset) ? findCredentials() : null;
+        let creds = (!activeModal && !h.isReset) ? await findCredentials() : null;
 
         if (!creds && !activeModal) {
           // 若弹窗未打开，看是否有「选择应用」或「切换应用」按钮
@@ -349,8 +356,8 @@ const APKGO_RECIPES = [
             await h.wait(800);
           }
 
-          // 切换到「服务端应用」标签
-          const serverTab = h.byText("button, a, div, span, li, .el-tabs__item, .ant-tabs-tab", /^(服务端应用|服务器应用)$/) ||
+          // 切换到「服务端应用」标签（OPPO 的组件是 .el-radio-button）
+          const serverTab = h.byText(".el-radio-button, button, a, div, span, li, .el-tabs__item", /^(服务端应用|服务器应用)$/) ||
                             h.byText("*", /^服务端应用$/);
           if (serverTab) {
             serverTab.click();
@@ -359,7 +366,7 @@ const APKGO_RECIPES = [
 
           // 切换标签后再次检查是否有现成应用（异步请求完成后可能直接出现）
           if (!h.isReset) {
-            creds = (await h.waitFor(() => findCredentials(), 2500)) || findCredentials();
+            creds = (await h.waitFor(async () => await findCredentials(), 3000)) || await findCredentials();
           }
         }
 
@@ -373,7 +380,9 @@ const APKGO_RECIPES = [
 
           let modal = activeModal || getCreateModal();
           if (!modal) {
-            const createBtn = h.byText("button, a, div, span", /^新建应用\s*\+?$/) ||
+            // OPPO 实际类名是 add-newserve
+            const createBtn = modal?.querySelector(".add-newserve") ||
+                              h.byText("button, a, div, span", /^新建应用\s*\+?$/) ||
                               h.byText("button, a, div, span", /新建应用/);
             if (!createBtn) {
               throw new Error("未找到「新建应用」按钮，请确认已在「我的API」页面并处于登录状态。");
@@ -389,7 +398,7 @@ const APKGO_RECIPES = [
           // 步骤 A：在「新建应用」弹窗中，明确点选「服务端应用」单选
           const selectServerRadio = async () => {
             const targets = [...modal.querySelectorAll(".el-radio, .ant-radio-wrapper, label, div, span")]
-              .filter((el) => /^服务端应用$/.test(h.textOf(el).trim()) && (el.offsetWidth > 0 || el.getClientRects().length));
+              .filter((el) => /服务端应用/.test(h.textOf(el).trim()) && (el.offsetWidth > 0 || el.getClientRects().length));
 
             for (const el of targets) {
               const container = el.closest(".el-radio, .ant-radio-wrapper, label") || el;
@@ -424,7 +433,7 @@ const APKGO_RECIPES = [
                 if (inp && (inp.offsetWidth > 0 || inp.getClientRects().length)) return inp;
               }
             }
-            const nameInp = modal.querySelector("input[placeholder*='名称'], input[name*='name'], input[placeholder*='输入应用名称']");
+            const nameInp = modal.querySelector("input[placeholder*='服务器应用名称'], input[placeholder*='名称'], input[name*='name']");
             if (nameInp && (nameInp.offsetWidth > 0 || nameInp.getClientRects().length)) return nameInp;
             return null;
           };
@@ -448,19 +457,29 @@ const APKGO_RECIPES = [
             throw new Error("未能成功选择「服务端应用」或未展开「应用名称」输入框，请在弹窗中点选「服务端应用」。");
           }
 
-          // 步骤 B：填名称
+          // 步骤 B：填名称（必须同时触发 input、change 与 InputEvent 保证 Vue 校验更新解禁确定按钮）
+          const appName = h.isReset ? `apkgo_${Date.now().toString(36).slice(-4)}` : "apkgo";
           nameInput.focus();
           h.highlight(nameInput);
-          const appName = h.isReset ? `apkgo_${Date.now().toString(36).slice(-4)}` : "apkgo";
           h.setInput(nameInput, appName);
+          nameInput.dispatchEvent(new InputEvent("input", { bubbles: true, data: appName, inputType: "insertText" }));
+          nameInput.dispatchEvent(new Event("input", { bubbles: true }));
+          nameInput.dispatchEvent(new Event("change", { bubbles: true }));
           await h.wait(800); // 留出让用户肉眼可见的节奏
 
           // 步骤 C：然后再确定
           const confirmBtn = await h.waitFor(() => {
-            const btns = [...modal.querySelectorAll(".el-dialog__footer button, button, a, span")]
-              .filter((b) => (b.offsetWidth > 0 || b.getClientRects().length) && !b.disabled);
-            return btns.find((b) => /^确定$/.test(h.textOf(b).trim()));
-          }, 3000);
+            const btns = [...modal.querySelectorAll(".footer-right button, .el-dialog__footer button, button, a, span")]
+              .filter((b) => (b.offsetWidth > 0 || b.getClientRects().length) && b.style.display !== "none");
+            const b = btns.find((x) => /^确定$/.test(h.textOf(x).trim()));
+            if (b && !b.disabled && !b.classList.contains("is-disabled")) return b;
+            // 若仍处于 disabled，再次激活输入事件
+            if (nameInput) {
+              nameInput.dispatchEvent(new Event("input", { bubbles: true }));
+              nameInput.dispatchEvent(new Event("change", { bubbles: true }));
+            }
+            return null;
+          }, 3000) || modal.querySelector(".footer-right button.el-button--primary");
 
           if (!confirmBtn) {
             throw new Error("在「新建应用」弹窗中未找到「确定」按钮。");
@@ -472,35 +491,12 @@ const APKGO_RECIPES = [
           await h.wait(2000); // 等待新建提交并关闭新建弹窗
 
           // 等待新应用出现在列表中
-          creds = (await h.waitFor(() => {
-            const c = findCredentials();
+          creds = (await h.waitFor(async () => {
+            const c = await findCredentials();
             if (!c) return null;
             if (h.isReset && existingIds.has(c.clientId)) return null;
             return c;
-          }, 8000)) || findCredentials();
-        }
-
-        // 选中列表行单选框（若处于「选择应用」弹窗中）
-        if (creds && creds.row) {
-          const rowRadio = creds.row.querySelector("input[type='radio'], .el-radio, .ant-radio, .el-radio__inner, [class*='radio']");
-          if (rowRadio) {
-            rowRadio.click();
-            await h.wait(200);
-          }
-        }
-
-        // 兜底再次检查眼睛图标
-        if (!creds || !creds.clientId || !creds.clientSecret) {
-          for (const doc of h.docs()) {
-            const eyes = doc.querySelectorAll(".anticon-eye, .anticon-eye-invisible, .el-icon-view, .el-icon-hide, i[class*='eye'], svg[class*='eye']");
-            for (const eye of eyes) {
-              if (eye.getClientRects().length) {
-                eye.click();
-                await h.wait(200);
-              }
-            }
-          }
-          creds = findCredentials();
+          }, 10000)) || await findCredentials();
         }
 
         if (!creds || !creds.clientId || !creds.clientSecret) {
