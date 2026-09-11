@@ -20,13 +20,35 @@ const APKGO_RECIPES = [
     prereq: ["需要团队管理员账号，否则顶部没有「用户与访问」", "华为提示「API 客户端」即将被 Service Account 替代，新建请选 Service Account"],
     steps: [
       { t: "登录 AppGallery Connect，顶部点「用户与访问」", d: "" },
-      { t: "左侧「API密钥 → Connect API」，停在「Service Account」页签", d: "列表里能看到已有的服务账号；apkgo 需要一个「开发者级 · APP管理员」的。" },
-      { t: "点右上角「创建」", d: "名称随意（如 apkgo），类型选「开发者级」，角色勾「APP管理员」，确认。" },
-      { t: "下载弹出的 JSON 文件，然后在本面板选中它", d: "JSON 只能下载一次，丢了要重新创建。" },
+      { t: "左侧「API密钥 → Connect API」，停在「Service Account」页签", d: "列表里能看到已有的服务账号；apkgo 需要一个「开发者级 · APP管理员」的。", action: "goto" },
+      { t: "点「创建」，填名称、选「开发者级」、勾「APP管理员」", d: "「帮我点」会打开弹窗并填好，最后的「确认」留给你点。", action: "open-create" },
+      { t: "点「确认」后下载 JSON，面板会自动抓到这个文件", d: "没抓到就手动「选文件」。JSON 只能下载一次。" },
     ],
     fields: [
-      { key: "service_account", label: "服务账号 JSON 文件", kind: "file-b64", accept: ".json,application/json", required: true },
+      { key: "service_account", label: "服务账号 JSON 文件", kind: "file-b64", accept: ".json,application/json", required: true, capture: { name: /\.json$/i, mime: /json/i } },
     ],
+    // AGC 正文在同源 iframe 里，Element UI：.el-dialog / .el-radio / .el-checkbox / .el-button。
+    actions: {
+      "open-create": async (h) => {
+        let dlg = h.byText(".el-dialog", /创建Service Account/);
+        if (!dlg) {
+          const btn = h.byText("button", /^创建$/);
+          if (!btn) throw new Error("没找到「创建」按钮。请确认停在「用户与访问 → API密钥 → Connect API」的 Service Account 页签。");
+          btn.click();
+          dlg = await h.waitFor(() => h.byText(".el-dialog", /创建Service Account/), 4000);
+          if (!dlg) throw new Error("点了「创建」但没等到弹窗，请手动点一次再试。");
+        }
+        const name = dlg.querySelector('input.el-input__inner[type="text"]');
+        if (name && !name.value) h.setInput(name, "apkgo");
+        const radio = h.byText(".el-radio", /^开发者级$/, dlg);
+        if (radio && !radio.querySelector("input:checked")) radio.click();
+        const cb = h.byText(".el-checkbox", /^APP管理员$/, dlg);
+        if (cb && !cb.querySelector("input:checked")) cb.click();
+        const ok = h.byText("button", /^确认$/, dlg);
+        if (ok) h.highlight(ok);
+        return "已填好：名称 apkgo、类型「开发者级」、角色「APP管理员」。请核对后点绿框里的「确认」，下载的 JSON 会自动进面板。";
+      },
+    },
   },
   {
     id: "xiaomi", cn: "小米", product: "小米开放平台",

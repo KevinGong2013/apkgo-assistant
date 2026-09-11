@@ -99,6 +99,20 @@ const handlers = {
     return { ok: true };
   },
 
+  // 在后台页面（含同源 iframe）的主世界里挂一个下载钩子：blob / <a download> /
+  // 带 attachment 的 fetch 与 XHR 一旦发生，就把文件内容 postMessage 给内容脚本，
+  // 面板据此自动填好「选文件」字段，省掉系统文件对话框。只挂在有配方的页面上。
+  async injectHook(_msg, sender) {
+    const tabId = sender && sender.tab && sender.tab.id;
+    if (!tabId) return { ok: false, error: "no tab" };
+    try {
+      await chrome.scripting.executeScript({ target: { tabId, allFrames: true }, world: "MAIN", func: downloadHook });
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: e.message || String(e) };
+    }
+  },
+
   async openPanel({ tabId }) {
     try { await chrome.tabs.sendMessage(tabId, { type: "open-panel" }); return { ok: true }; }
     catch (e) { return { ok: false, error: "这个页面上没有助手面板，刷新一下再试" }; }
@@ -124,4 +138,53 @@ function updateBadge(tabId, url) {
 chrome.tabs.onUpdated.addListener((tabId, info, tab) => { if (info.status === "complete" || info.url) updateBadge(tabId, tab.url); });
 chrome.tabs.onActivated.addListener(async ({ tabId }) => {
   try { const t = await chrome.tabs.get(tabId); updateBadge(tabId, t.url); } catch { /* 无权限的页面拿不到 url */ }
+});
+
+// 主世界里跑的钩子。只在页面自己发起下载时读一份副本，不改变原有行为。
+// 2MB 以上的不读（密钥文件都很小），非文本也不读。
+function downloadHook() {
+  if (window.__apkgoDownloadHook) return;
+  window.__apkgoDownloadHook = true;
+  const MAX = 2 * 1024 * 1024;
+  const emit = (name, mime, text) => { try { window.postMessage({ source: "apkgo-assistant-hook", type: "download", name: String(name || ""), mime: String(mime || ""), text }, "*"); } catch (e) { /* ignore */ } };
+  const readBlob = (blob, name) => { try { if (blob && blob.size <= MAX) blob.text().then((t) => emit(name, blob.type, t)); } catch (e) { /* ignore */ } };
+  const blobs = new Map();
+  const origCreate = URL.createObjectURL;
+  URL.createObjectURL = function (obj) { const url = origCreate.call(this, obj); try { if (obj instanceof Blob) blobs.set(url, obj); } catch (e) { /* ignore */ } return url; };
+  const origClick = HTMLAnchorElement.prototype.click;
+  HTMLAnchorElement.prototype.click = function () {
+    try {
+      const href = String(this.href || "");
+      const name = this.download || href.split("/").pop().split("?")[0];
+      if (blobs.has(href)) readBlob(blobs.get(href), name);
+      else if (/^https?:/.test(href) && (this.download || /\.(json|cer|pem|p8|key)(\?|$)/i.test(href))) fetch(href, { credentials: "include" }).then((r) => r.blob()).then((b) => readBlob(b, name)).catch(() => {});
+    } catch (e) { /* ignore */ }
+    return origClick.apply(this, arguments);
+  };
+  const isAttachment = (cd, ct) => /attachment/i.test(cd || "") || /octet-stream/i.test(ct || "");
+  const nameFrom = (cd, url) => { const m = /filename\*?=(?:UTF-8'')?"?([^";]+)/i.exec(cd || ""); return m ? decodeURIComponent(m[1]) : String(url || "").split("/").pop().split("?")[0]; };
+  const origFetch = window.fetch;
+  window.fetch = async function (input) {
+    const r = await origFetch.apply(this, arguments);
+    try { const cd = r.headers.get("content-disposition"); const ct = r.headers.get("content-type"); if (isAttachment(cd, ct)) r.clone().blob().then((b) => readBlob(b, nameFrom(cd, typeof input === "string" ? input : input.url))); } catch (e) { /* ignore */ }
+    return r;
+  };
+  const XO = XMLHttpRequest.prototype.open;
+  XMLHttpRequest.prototype.open = function (m, u) {
+    this.addEventListener("load", function () {
+      try { const cd = this.getResponseHeader("content-disposition"); const ct = this.getResponseHeader("content-type"); if (!isAttachment(cd, ct)) return; const res = this.response; if (typeof res === "string") emit(nameFrom(cd, u), ct, res); else if (res instanceof Blob) readBlob(res, nameFrom(cd, u)); } catch (e) { /* ignore */ }
+    });
+    return XO.apply(this, arguments);
+  };
+}
+
+// 浏览器层面的下载（页面直接跳到一个 URL、或钩子没覆盖到的路径）：把 URL 和文件名
+// 告诉那个标签页的内容脚本，由它带着页面 cookie 再取一份内容。
+chrome.downloads.onCreated.addListener((item) => {
+  const url = item.finalUrl || item.url || "";
+  if (!/^https?:/.test(url)) return;
+  if (!/\.(json|cer|pem|p8|key)(\?|$)/i.test(item.filename || url)) return;
+  chrome.tabs.query({ active: true, currentWindow: true }).then(([tab]) => {
+    if (tab && tab.id) chrome.tabs.sendMessage(tab.id, { type: "download-created", url, filename: item.filename || "" }).catch(() => {});
+  });
 });

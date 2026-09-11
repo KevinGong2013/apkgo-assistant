@@ -33,6 +33,8 @@ apkgo 助手是 apkgo cloud 的配套扩展。apkgo cloud 帮你把安装包一�
 | 权限 | 用途 |
 |---|---|
 | `storage` | 保存连接 apkgo 的令牌（local）和采集中的密钥草稿（session，关浏览器即清）。 |
+| `scripting` | 在商店后台页面注入一个下载钩子（主世界），页面下载密钥文件时把内容填进面板，免去文件对话框。只读页面自己发起的下载。 |
+| `downloads` | 识别刚发生的密钥文件下载（.json/.cer/.pem/.p8），配合钩子；不读取其他下载。 |
 | 各商店后台域名（host permissions） | 在这些页面上显示助手面板，并按用户操作读取密钥字段。列表见 manifest.json，没有 `<all_urls>`。 |
 | `https://apkgo.baici.tech/*`、`http://localhost/*` | 让 apkgo 网页把令牌交给扩展；localhost 供本地开发。 |
 | 可选站点权限（optional_host_permissions） | 仅当用户把扩展连接到私有化部署的 apkgo 地址时，由用户手动授权。 |

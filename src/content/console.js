@@ -20,6 +20,7 @@
   let picking = null; // 正在点选的字段 key
   let result = null;  // { kind: ok|err|warn, html }
   let busy = false;
+  let busyAction = "";
 
   // ---- shadow host ----
   const host = document.createElement("div");
@@ -36,10 +37,16 @@
   panel.className = "panel";
   const pickbar = document.createElement("div");
   pickbar.className = "pickbar";
-  root.append(launch, panel, pickbar);
+  // 「帮我点」做完后的提示条：面板会收起来让位给页面上的按钮，提示挪到顶部。
+  const notice = document.createElement("div");
+  notice.className = "pickbar notice";
+  root.append(launch, panel, pickbar, notice);
+  notice.addEventListener("click", (e) => { if (e.target.dataset.n === "open") { hideNotice(); togglePanel(true); } if (e.target.dataset.n === "x") hideNotice(); });
+  function showNotice(html) { notice.innerHTML = `<span>${html}</span><button class="mini" data-n="open">打开面板</button><button class="x" data-n="x" title="关闭">×</button>`; notice.classList.add("on"); }
+  function hideNotice() { notice.classList.remove("on"); }
   document.documentElement.appendChild(host);
 
-  launch.addEventListener("click", () => togglePanel());
+  launch.addEventListener("click", () => { hideNotice(); togglePanel(); });
 
   function esc(s) { return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
 
@@ -57,7 +64,7 @@
     const preHtml = recipe.prereq.length
       ? `<div class="sec"><div class="sec-t">先确认</div><ul class="pre">${recipe.prereq.map((p) => `<li>${esc(p)}</li>`).join("")}</ul></div>` : "";
 
-    const stepsHtml = `<div class="sec"><div class="sec-t">在 ${esc(recipe.product)} 里</div><ol class="steps">${recipe.steps.map((s, i) => `<li><span class="n">${i + 1}</span><div><div class="st">${esc(s.t)}</div>${s.d ? `<div class="sd">${esc(s.d)}</div>` : ""}</div></li>`).join("")}</ol></div>`;
+    const stepsHtml = `<div class="sec"><div class="sec-t">在 ${esc(recipe.product)} 里</div><ol class="steps">${recipe.steps.map((s, i) => `<li><span class="n">${i + 1}</span><div style="flex:1;min-width:0"><div class="st">${esc(s.t)}</div>${s.d ? `<div class="sd">${esc(s.d)}</div>` : ""}</div>${s.action ? `<button class="mini ${busyAction === s.action ? "on" : ""}" data-action="${esc(s.action)}" ${busyAction ? "disabled" : ""}>${busyAction === s.action ? "正在点…" : "帮我点"}</button>` : ""}</li>`).join("")}</ol></div>`;
 
     let formHtml = "";
     if (hasFields) {
@@ -107,12 +114,13 @@
 
   // ---- events (delegated) ----
   panel.addEventListener("click", async (e) => {
-    const t = e.target.closest("[data-act],[data-pick],[data-eye],[data-unfile]");
+    const t = e.target.closest("[data-act],[data-pick],[data-eye],[data-unfile],[data-action]");
     if (!t) return;
     if (t.dataset.act === "close") return togglePanel(false);
     if (t.dataset.act === "auto") return autoDetect();
     if (t.dataset.act === "clear") { draft = { label: "", config: {}, files: {}, appId: draft.appId }; result = null; await saveDraft(); return render(); }
     if (t.dataset.act === "save") return submit();
+    if (t.dataset.action) return runAction(t.dataset.action);
     if (t.dataset.pick) return startPick(t.dataset.pick);
     if (t.dataset.eye) { const inp = panel.querySelector(`input[data-k="${t.dataset.eye}"]`); if (inp) { inp.type = inp.type === "password" ? "text" : "password"; t.textContent = inp.type === "password" ? "显示" : "隐藏"; } return; }
     if (t.dataset.unfile) { delete draft.config[t.dataset.unfile]; delete draft.files[t.dataset.unfile]; await saveDraft(); return render(); }
@@ -147,7 +155,7 @@
   function togglePanel(force) {
     const open = force === undefined ? !panel.classList.contains("open") : force;
     panel.classList.toggle("open", open);
-    if (open) { refreshState(); }
+    if (open) { refreshState(); ensureHook(); }
   }
 
   // ---- storage ----
@@ -315,6 +323,93 @@
       : null;
     render();
   }
+
+  // ---- 「帮我点」：配方里声明的页面动作。最后的确认键永远留给用户 ----
+  function byText(sel, re, root) {
+    const roots = root ? [root] : docs().map((d) => d.body);
+    for (const r of roots) {
+      for (const el of r.querySelectorAll(sel)) {
+        if (re.test(textOf(el)) && el.getClientRects().length) return el;
+      }
+    }
+    return null;
+  }
+  function setInput(inp, value) {
+    const proto = Object.getPrototypeOf(inp);
+    const desc = Object.getOwnPropertyDescriptor(proto, "value") || Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value");
+    if (desc && desc.set) desc.set.call(inp, value); else inp.value = value;
+    inp.dispatchEvent(new Event("input", { bubbles: true }));
+    inp.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+  function highlight(el) {
+    el.style.outline = "3px solid #18E299";
+    el.style.outlineOffset = "2px";
+    try { el.scrollIntoView({ block: "center", behavior: "smooth" }); } catch { /* ignore */ }
+  }
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  async function waitFor(fn, ms = 4000) {
+    const end = Date.now() + ms;
+    while (Date.now() < end) { const v = fn(); if (v) return v; await wait(120); }
+    return null;
+  }
+  async function runAction(id) {
+    if (id === "goto") {
+      if (location.href.split("#")[0] !== recipe.console.split("#")[0] || location.hash !== new URL(recipe.console).hash) { location.href = recipe.console; return; }
+      result = { kind: "ok", html: "已经在这一页了。" }; return render();
+    }
+    const fn = recipe.actions && recipe.actions[id];
+    if (!fn) return;
+    busyAction = id; result = null; render();
+    try {
+      await ensureHook();
+      const msg = await fn({ docs, byText, setInput, highlight, wait, waitFor, draft, textOf });
+      result = { kind: "ok", html: esc(msg || "已完成。") };
+      busyAction = ""; render();
+      // 让位：面板可能正盖着页面上要点的按钮。
+      togglePanel(false);
+      showNotice(esc(msg || "已完成。"));
+      return;
+    } catch (e) {
+      result = { kind: "warn", html: esc(e.message || String(e)) };
+    }
+    busyAction = ""; render();
+  }
+
+  // ---- 下载自动抓取：页面一下载密钥文件，直接填进对应的文件字段 ----
+  let hookReady = false;
+  const hookedWindows = new WeakSet();
+  async function ensureHook() {
+    if (!recipe.fields.some((f) => f.capture)) return;
+    // 页面里的钩子是幂等的（挂过就跳过），每次都注入一遍，好把后来才加载的 iframe 也覆盖到。
+    const r = await APKGO.send({ type: "injectHook" }); hookReady = !!r.ok;
+    for (const d of docs()) {
+      const w = d.defaultView;
+      if (!w || hookedWindows.has(w)) continue;
+      hookedWindows.add(w);
+      w.addEventListener("message", onHookMessage);
+    }
+  }
+  function onHookMessage(e) {
+    const d = e.data;
+    if (!d || d.source !== "apkgo-assistant-hook" || d.type !== "download") return;
+    ingestDownload(d.name, d.mime, d.text);
+  }
+  async function ingestDownload(name, mime, text) {
+    const f = recipe.fields.find((x) => x.capture && ((x.capture.name && x.capture.name.test(name || "")) || (x.capture.mime && x.capture.mime.test(mime || ""))));
+    if (!f || !text) return;
+    draft.config[f.key] = f.kind === "file-text" ? text : btoa(unescape(encodeURIComponent(text)));
+    draft.files[f.key] = name || "下载的文件";
+    await saveDraft();
+    result = { kind: "ok", html: `已自动抓到下载的 ${esc(name || "文件")}，填进了「${esc(f.label)}」。核对后点保存。` };
+    hideNotice();
+    togglePanel(true);
+    render();
+  }
+  chrome.runtime.onMessage.addListener((msg) => {
+    if (msg && msg.type === "download-created" && recipe.fields.some((f) => f.capture)) {
+      fetch(msg.url, { credentials: "include" }).then((r) => (r.ok ? r.text() : "")).then((t) => ingestDownload(msg.filename.split("/").pop(), "", t)).catch(() => {});
+    }
+  });
 
   // ---- submit ----
   async function submit() {

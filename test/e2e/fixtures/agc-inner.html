@@ -1,0 +1,28 @@
+<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>Connect API</title>
+<style>body{font:14px -apple-system,"PingFang SC",sans-serif;margin:0;padding:24px;color:#222}.agc-page-header{display:flex;justify-content:space-between;align-items:center}.el-button{padding:8px 18px;border:1px solid #dcdfe6;border-radius:4px;background:#fff;cursor:pointer}.el-button--primary{background:#c7000b;color:#fff;border-color:#c7000b}table{border-collapse:collapse;width:100%;margin-top:16px}td,th{padding:10px;border-bottom:1px solid #eee;text-align:left}.el-dialog__wrapper{position:fixed;inset:0;background:rgba(0,0,0,.4);display:none}.el-dialog__wrapper.on{display:block}.el-dialog{background:#fff;width:520px;margin:120px auto;border-radius:6px;padding:20px}.el-form-item{display:flex;align-items:center;gap:12px;margin:14px 0}.el-form-item__label{width:70px;color:#606266}.el-input__inner{padding:6px 10px;border:1px solid #dcdfe6;border-radius:4px;width:320px}.el-radio,.el-checkbox{margin-right:16px;cursor:pointer}.el-dialog__footer{text-align:right;margin-top:20px}</style></head>
+<body><div class="agc-page-header"><h2 style="margin:0">AppGallery Connect API</h2><div class="agc-page-header__right"><button class="el-button el-button--primary"><span>创建</span></button></div></div>
+<p>Service Account是更安全的凭据，新创建凭据请您选择Service Account。</p>
+<table><tr><th>名称</th><th>ID</th><th>类型</th><th>角色</th></tr><tr><td>apkgo</td><td>117564105</td><td>开发者级</td><td>APP管理员</td></tr></table>
+<div class="el-dialog__wrapper"><div class="el-dialog"><div class="el-dialog__header">创建Service Account</div>
+<div class="el-form-item"><label class="el-form-item__label">名称：</label><div class="el-input"><input class="el-input__inner" type="text"></div></div>
+<div class="el-form-item"><label class="el-form-item__label">类型：</label><label class="el-radio"><span class="el-radio__input"><input type="radio" class="el-radio__original" name="t" value="dev"></span><span class="el-radio__label">开发者级</span></label><label class="el-radio"><span class="el-radio__input"><input type="radio" class="el-radio__original" name="t" value="proj"></span><span class="el-radio__label">项目级</span></label></div>
+<div class="el-form-item"><label class="el-form-item__label">角色：</label><label class="el-checkbox"><span class="el-checkbox__input"><input type="checkbox" class="el-checkbox__original" value="app"></span><span class="el-checkbox__label">APP管理员</span></label><label class="el-checkbox"><span class="el-checkbox__input"><input type="checkbox" class="el-checkbox__original" value="admin"></span><span class="el-checkbox__label">管理员</span></label></div>
+<div class="el-dialog__footer"><button class="el-button el-button--primary"><span>确认</span></button><button class="el-button"><span>取消</span></button></div></div></div>
+<script>
+const wrap = document.querySelector('.el-dialog__wrapper');
+document.querySelector('.agc-page-header__right button').onclick = () => wrap.classList.add('on');
+const btns = [...document.querySelectorAll('.el-dialog__footer button')];
+btns[1].onclick = () => wrap.classList.remove('on');
+btns[0].onclick = () => {
+  const name = document.querySelector('input.el-input__inner').value.trim();
+  const type = (document.querySelector('input[name=t]:checked') || {}).value;
+  const roles = [...document.querySelectorAll('.el-checkbox__original:checked')].map((c) => c.value);
+  if (!name || !type || !roles.length) { alert('请填写完整'); return; }
+  const json = JSON.stringify({ sub_account: '317654321', key_id: 'k1', private_key: '-----BEGIN PRIVATE KEY-----\nFAKE\n-----END PRIVATE KEY-----', name, type, roles }, null, 2);
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([json], { type: 'application/json' }));
+  a.download = 'agc-apikey-' + name + '.json';
+  document.body.appendChild(a); a.click(); a.remove();
+  wrap.classList.remove('on');
+};
+</script></body></html>

@@ -61,4 +61,8 @@ const APKGO_PANEL_CSS = `
 .pickbar { position: fixed; left: 50%; top: 16px; transform: translateX(-50%); z-index: 2147483001; background: #0F1613; color: #fff; border: 1px solid rgba(24,226,153,.5); border-radius: 9999px; padding: 8px 16px; font: 12px Inter, system-ui, sans-serif; box-shadow: 0 8px 24px rgba(0,0,0,.4); display: none; }
 .pickbar.on { display: block; }
 .pickbar b { color: #18E299; }
+.notice { display: none; align-items: center; gap: 10px; max-width: min(720px, calc(100vw - 40px)); border-radius: 14px; padding: 9px 10px 9px 16px; line-height: 1.45; }
+.notice.on { display: flex; }
+.notice .mini { flex-shrink: 0; }
+.notice .x { flex-shrink: 0; padding: 0 6px; }
 `;

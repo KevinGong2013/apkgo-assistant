@@ -89,7 +89,60 @@ try {
   const received = await (await fetch(`${ORIGIN}/__received`)).json();
   step("server received", { count: received.length, first: received[0] });
 
-  // 7. 弹窗页能打开、显示已连接
+  // 7. 华为半自动：「帮我点」打开并填好创建弹窗 → 用户点「确认」→ 下载的 JSON 自动进面板 → 保存
+  const AGC_OUTER = fs.readFileSync(path.join(HERE, "fixtures/agc-outer.html"), "utf8");
+  const AGC_INNER = fs.readFileSync(path.join(HERE, "fixtures/agc-inner.html"), "utf8");
+  await ctx.route("https://developer.huawei.com/**", (route) => route.fulfill({ contentType: "text/html; charset=utf-8", body: route.request().url().includes("/cdp/") ? AGC_INNER : AGC_OUTER }));
+  const agc = await ctx.newPage();
+  await agc.goto("https://developer.huawei.com/consumer/cn/service/josp/agc/index.html#/ups/9249519184595983326");
+  await agc.waitForSelector("#apkgo-assistant-root", { state: "attached", timeout: 10000 });
+  await agc.frameLocator("iframe").locator("text=Service Account是更安全的凭据").waitFor({ timeout: 10000 });
+  await agc.waitForTimeout(600);
+  const cdp2 = await ctx.newCDPSession(agc);
+  await cdp2.send("DOM.enable"); await cdp2.send("Runtime.enable");
+  async function inShadow2(fnSrc, ...args) {
+    const { root } = await cdp2.send("DOM.getDocument", { depth: 0 });
+    const { nodeId: hostId } = await cdp2.send("DOM.querySelector", { nodeId: root.nodeId, selector: "#apkgo-assistant-root" });
+    const { node } = await cdp2.send("DOM.describeNode", { nodeId: hostId, pierce: true });
+    const { object } = await cdp2.send("DOM.resolveNode", { backendNodeId: node.shadowRoots[0].backendNodeId });
+    const r = await cdp2.send("Runtime.callFunctionOn", { objectId: object.objectId, functionDeclaration: `function(...a){ return (${fnSrc})(this, ...a); }`, arguments: args.map((v) => ({ value: v })), returnByValue: true, awaitPromise: true });
+    if (r.exceptionDetails) throw new Error(r.exceptionDetails.text + " " + JSON.stringify(r.exceptionDetails.exception));
+    return r.result.value;
+  }
+  await inShadow2(`(sr) => { if (!sr.querySelector('.panel').classList.contains('open')) sr.querySelector('.launch').click(); }`);
+  await agc.waitForTimeout(400);
+  step("huawei panel", { actions: await inShadow2(`(sr) => [...sr.querySelectorAll('[data-action]')].map((b) => b.dataset.action)`) });
+  await inShadow2(`(sr) => sr.querySelector('[data-action="open-create"]').click()`);
+  await agc.waitForTimeout(1200);
+  const inner = agc.frameLocator("iframe");
+  step("huawei open-create", {
+    msg: await inShadow2(`(sr) => (sr.querySelector('.msg')||{}).textContent`),
+    dialogVisible: await inner.locator(".el-dialog__wrapper.on").count(),
+    name: await inner.locator("input.el-input__inner").inputValue(),
+    devChecked: await inner.locator('input[name=t][value=dev]').isChecked(),
+    appAdminChecked: await inner.locator('.el-checkbox__original[value=app]').isChecked(),
+    okOutlined: await inner.locator(".el-dialog__footer button").first().evaluate((b) => b.style.outline),
+  });
+  step("huawei panel gave way", { panel: await inShadow2(`(sr) => sr.querySelector('.panel').className`), notice: await inShadow2(`(sr) => sr.querySelector('.notice').className`) });
+  await agc.screenshot({ path: path.join(HERE, "../../dist/shots/05-huawei-filled.png") });
+  // 用户点「确认」→ 页面用 <a download> 下载 blob JSON → 钩子抓到 → 面板填好
+  step("huawei hook present", { top: await agc.evaluate(() => !!window.__apkgoDownloadHook), inner: await inner.locator("body").evaluate(() => !!window.__apkgoDownloadHook) });
+  const dl = agc.waitForEvent("download", { timeout: 5000 }).then((d) => ({ name: d.suggestedFilename() }), () => ({ name: null }));
+  await inner.locator(".el-dialog__footer button").first().click();
+  step("huawei browser download event", await dl);
+  await agc.waitForTimeout(1500);
+  step("huawei captured", await inShadow2(`(sr) => ({ file: (sr.querySelector('.file .name')||{}).textContent, msg: (sr.querySelector('.msg')||{}).textContent })`));
+  await agc.screenshot({ path: path.join(HERE, "../../dist/shots/06-huawei-captured.png") });
+  await inShadow2(`(sr) => sr.querySelector('[data-act=save]').click()`);
+  await agc.waitForTimeout(1500);
+  const received2 = await (await fetch(`${ORIGIN}/__received`)).json();
+  const last = received2[received2.length - 1];
+  const sa = last && last.body && last.body.config && last.body.config.service_account;
+  const decoded = sa ? JSON.parse(Buffer.from(sa, "base64").toString("utf8")) : null;
+  step("huawei saved", { msg: await inShadow2(`(sr) => (sr.querySelector('.msg')||{}).textContent`), store: last && last.body.store_name, jsonKeys: decoded && Object.keys(decoded), name: decoded && decoded.name, roles: decoded && decoded.roles });
+  if (!decoded || decoded.name !== "apkgo" || !decoded.roles.includes("app")) throw new Error("华为半自动没有把下载的 JSON 送到服务端");
+
+  // 8. 弹窗页能打开、显示已连接
   const popup = await ctx.newPage();
   await popup.goto(`chrome-extension://${new URL(sw.url()).host}/src/popup/popup.html`);
   await popup.waitForTimeout(600);
