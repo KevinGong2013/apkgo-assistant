@@ -15,13 +15,14 @@ const APKGO_RECIPES = [
   {
     id: "huawei", cn: "华为", product: "AppGallery Connect",
     hostRe: /(^|\.)developer\.huawei\.com$/,
-    console: "https://developer.huawei.com/consumer/cn/service/josp/agc/index.html#/",
-    prereq: ["需要团队管理员账号（普通成员看不到「用户与访问」）", "华为已把「API 客户端」标为迁移中，请用「服务账号」"],
+    // 「用户与访问 → API密钥 → Connect API」那一页（2026-09 实登核对）。
+    console: "https://developer.huawei.com/consumer/cn/service/josp/agc/index.html#/ups/9249519184595983326",
+    prereq: ["需要团队管理员账号，否则顶部没有「用户与访问」", "华为提示「API 客户端」即将被 Service Account 替代，新建请选 Service Account"],
     steps: [
-      { t: "登录 AppGallery Connect", d: "用团队管理员账号登录。" },
-      { t: "左上角进入「用户与访问」", d: "不是「我的项目」，在顶部导航或左侧菜单。" },
-      { t: "「API 密钥」→「服务账号」→ 创建", d: "角色至少勾选发布相关权限（应用管理 / 发布）。" },
-      { t: "下载服务账号 JSON", d: "只能下载一次，下载后在本面板选中这个文件。" },
+      { t: "登录 AppGallery Connect，顶部点「用户与访问」", d: "" },
+      { t: "左侧「API密钥 → Connect API」，停在「Service Account」页签", d: "列表里能看到已有的服务账号；apkgo 需要一个「开发者级 · APP管理员」的。" },
+      { t: "点右上角「创建」", d: "名称随意（如 apkgo），类型选「开发者级」，角色勾「APP管理员」，确认。" },
+      { t: "下载弹出的 JSON 文件，然后在本面板选中它", d: "JSON 只能下载一次，丢了要重新创建。" },
     ],
     fields: [
       { key: "service_account", label: "服务账号 JSON 文件", kind: "file-b64", accept: ".json,application/json", required: true },

@@ -175,10 +175,20 @@
   }
 
   // ---- auto detect: 找标签文字，再在它附近找一个像样的值 ----
+  // 不少后台（华为 AGC 就是）把正文放在同源 iframe 里，识别和点选都要进去找。
+  // 跨域 iframe 拿不到 contentDocument，会被静默跳过。
+  function docs() {
+    const out = [document];
+    document.querySelectorAll("iframe").forEach((f) => {
+      try { const d = f.contentDocument; if (d && d.body) out.push(d); } catch { /* 跨域 */ }
+    });
+    return out;
+  }
   function isVisible(el) {
     const r = el.getBoundingClientRect();
     if (!r.width && !r.height) return false;
-    const cs = getComputedStyle(el);
+    const win = (el.ownerDocument && el.ownerDocument.defaultView) || window;
+    const cs = win.getComputedStyle(el);
     return cs.visibility !== "hidden" && cs.display !== "none";
   }
   function textOf(el) { return (el.innerText || el.textContent || "").trim(); }
@@ -212,18 +222,20 @@
   function detectField(f) {
     if (!f.hints || !f.hints.length) return "";
     const labels = [];
-    const all = document.body.querySelectorAll("label,th,td,dt,dd,span,div,p,strong,b,li,h1,h2,h3,h4");
-    for (const el of all) {
-      if (el.children.length > 3) continue;
-      const t = textOf(el);
-      if (!t || t.length > 60) continue;
-      if (f.hints.some((re) => re.test(t)) && isVisible(el)) labels.push(el);
-      if (labels.length > 40) break;
+    for (const doc of docs()) {
+      const all = doc.body.querySelectorAll("label,th,td,dt,dd,span,div,p,strong,b,li,h1,h2,h3,h4");
+      for (const el of all) {
+        if (el.children.length > 3) continue;
+        const t = textOf(el);
+        if (!t || t.length > 60) continue;
+        if (f.hints.some((re) => re.test(t)) && isVisible(el)) labels.push(el);
+        if (labels.length > 40) break;
+      }
     }
     for (const label of labels) {
       const cands = [];
       if (label.tagName === "LABEL" && label.htmlFor) {
-        const inp = document.getElementById(label.htmlFor);
+        const inp = label.ownerDocument.getElementById(label.htmlFor);
         if (inp && inp.value) cands.push(inp.value);
       }
       const inner = plausible(f, textOf(label));
@@ -258,23 +270,30 @@
     const f = recipe.fields.find((x) => x.key === key);
     pickbar.innerHTML = `点一下页面上的 <b>${esc(f.label)}</b>，Esc 取消`;
     pickbar.classList.add("on");
-    document.addEventListener("mouseover", onHover, true);
-    document.addEventListener("click", onPickClick, true);
-    document.addEventListener("keydown", onKey, true);
+    pickDocs = docs();
+    for (const d of pickDocs) {
+      d.addEventListener("mouseover", onHover, true);
+      d.addEventListener("click", onPickClick, true);
+      d.addEventListener("keydown", onKey, true);
+    }
     render();
   }
+  let pickDocs = [];
   function stopPick() {
     picking = null;
     pickbar.classList.remove("on");
     if (lastHover) { lastHover.style.outline = lastHover.__apkgoOutline || ""; lastHover = null; }
-    document.removeEventListener("mouseover", onHover, true);
-    document.removeEventListener("click", onPickClick, true);
-    document.removeEventListener("keydown", onKey, true);
+    for (const d of pickDocs) {
+      d.removeEventListener("mouseover", onHover, true);
+      d.removeEventListener("click", onPickClick, true);
+      d.removeEventListener("keydown", onKey, true);
+    }
+    pickDocs = [];
     render();
   }
   function onHover(e) {
     const el = e.target;
-    if (!el || host.contains(el)) return;
+    if (!el || !el.style || host.contains(el)) return;
     if (lastHover && lastHover !== el) lastHover.style.outline = lastHover.__apkgoOutline || "";
     if (el !== lastHover) { el.__apkgoOutline = el.style.outline; el.style.outline = "2px solid #18E299"; lastHover = el; }
   }
