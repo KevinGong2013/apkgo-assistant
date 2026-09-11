@@ -43,7 +43,19 @@
   // 「帮我点」做完后的提示条：面板会收起来让位给页面上的按钮，提示挪到顶部。
   const notice = document.createElement("div");
   notice.className = "pickbar notice";
-  root.append(launch, panel, pickbar, notice);
+  // 引导气泡：告诉用户「点这里」。
+  const bubble = document.createElement("div");
+  bubble.className = "bubble";
+  const bubbleText = recipe.flow && recipe.flow.length
+    ? `${escLabel(recipe.cn)}的密钥在哪？点这里，一键获取 👇`
+    : (recipe.fields.length ? `${escLabel(recipe.cn)}的密钥在哪？点这里，帮你找到并存进 apkgo 👇` : `${escLabel(recipe.cn)}的密钥怎么拿？点这里看步骤 👇`);
+  bubble.innerHTML = `<span>${bubbleText}</span><button class="bx" title="知道了">×</button>`;
+  bubble.addEventListener("click", (e) => {
+    if (e.target.classList.contains("bx")) { hideBubble(); return; }
+    hideBubble(); hideNotice(); togglePanel(true);
+  });
+  function hideBubble() { bubble.classList.remove("on"); try { chrome.storage.session.set({ launcherSeen: true }); } catch { /* ignore */ } }
+  root.append(launch, panel, pickbar, notice, bubble);
   notice.addEventListener("click", (e) => { if (e.target.dataset.n === "open") { hideNotice(); togglePanel(true); } if (e.target.dataset.n === "x") hideNotice(); });
   function showNotice(html) { notice.innerHTML = `<span>${html}</span><button class="mini" data-n="open">打开面板</button><button class="x" data-n="x" title="关闭">×</button>`; notice.classList.add("on"); }
   function hideNotice() { notice.classList.remove("on"); }
@@ -54,7 +66,10 @@
   (async () => {
     let seen = false;
     try { ({ launcherSeen: seen } = await chrome.storage.session.get("launcherSeen")); } catch { /* ignore */ }
-    if (!seen) { launch.classList.add("attn"); setTimeout(() => launch.classList.remove("attn"), 25000); }
+    if (!seen) {
+      launch.classList.add("attn"); bubble.classList.add("on");
+      setTimeout(() => { launch.classList.remove("attn"); bubble.classList.remove("on"); }, 30000);
+    }
   })();
 
   function esc(s) { return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
@@ -170,7 +185,7 @@
     panel.classList.toggle("open", open);
     launch.classList.toggle("hide", open);
     if (open) {
-      launch.classList.remove("attn");
+      launch.classList.remove("attn"); bubble.classList.remove("on");
       try { chrome.storage.session.set({ launcherSeen: true }); } catch { /* ignore */ }
       refreshState(); ensureHook();
     }

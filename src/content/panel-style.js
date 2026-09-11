@@ -18,7 +18,15 @@ const APKGO_PANEL_CSS = `
 @keyframes apkgo-pop { from { transform: translate(-50%, 28px); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }
 @keyframes apkgo-bounce { 0%, 100% { transform: translate(-50%, 0); } 30% { transform: translate(-50%, -10px); } 55% { transform: translate(-50%, 0); } 75% { transform: translate(-50%, -5px); } }
 @keyframes apkgo-ring { 0% { transform: scale(1); opacity: .9; } 100% { transform: scale(1.3); opacity: 0; } }
-@media (prefers-reduced-motion: reduce) { .launch.attn { animation: none; } .launch.attn::after { animation: none; display: none; } }
+/* 引导气泡：在启动按钮正上方，小三角指向按钮；随按钮出现，轻轻浮动；点开面板或点 × 就走。 */
+.bubble { position: fixed; left: 62%; bottom: calc(72px + 54px + 16px); transform: translateX(-50%); z-index: 2147483000; display: none; align-items: center; gap: 10px; padding: 11px 12px 11px 16px; border-radius: 14px; background: #18E299; color: #04160E; font: 600 14px/1.3 Inter, -apple-system, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif; white-space: nowrap; box-shadow: 0 12px 32px rgba(0,0,0,.28); cursor: pointer; }
+.bubble.on { display: flex; animation: apkgo-bubble-in .45s cubic-bezier(.2,.9,.3,1.2) .7s both, apkgo-bob 2.2s ease-in-out 1.2s infinite; }
+.bubble::after { content: ""; position: absolute; left: 50%; bottom: -8px; width: 16px; height: 16px; background: #18E299; transform: translateX(-50%) rotate(45deg); border-radius: 3px; }
+.bubble .bx { background: rgba(4,22,14,.12); border: none; color: #04160E; width: 22px; height: 22px; border-radius: 50%; font-size: 15px; line-height: 1; cursor: pointer; display: grid; place-items: center; flex-shrink: 0; }
+.bubble .bx:hover { background: rgba(4,22,14,.22); }
+@keyframes apkgo-bubble-in { from { transform: translate(-50%, 10px); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }
+@keyframes apkgo-bob { 0%, 100% { transform: translate(-50%, 0); } 50% { transform: translate(-50%, -6px); } }
+@media (prefers-reduced-motion: reduce) { .launch.attn { animation: none; } .launch.attn::after { animation: none; display: none; } .bubble.on { animation: none; } }
 .panel { position: fixed; right: 20px; bottom: 20px; z-index: 2147483000; width: 360px; max-height: calc(100vh - 100px); overflow: auto; background: #0F1613; color: #E6EDE9; border: 1px solid rgba(255,255,255,.08); border-radius: 16px; box-shadow: 0 20px 60px rgba(0,0,0,.45); font: 13px/1.5 Inter, -apple-system, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif; display: none; }
 .panel.open { display: block; }
 .head { display: flex; align-items: center; gap: 10px; padding: 14px 16px; border-bottom: 1px solid rgba(255,255,255,.06); position: sticky; top: 0; background: #0F1613; z-index: 1; }
