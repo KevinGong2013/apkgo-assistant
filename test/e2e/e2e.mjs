@@ -112,7 +112,8 @@ try {
   await inShadow2(`(sr) => { if (!sr.querySelector('.panel').classList.contains('open')) sr.querySelector('.launch').click(); }`);
   await agc.waitForTimeout(400);
   step("huawei panel", { actions: await inShadow2(`(sr) => [...sr.querySelectorAll('[data-action]')].map((b) => b.dataset.action)`) });
-  await inShadow2(`(sr) => sr.querySelector('[data-action="open-create"]').click()`);
+  step("huawei one-click present", { btn: await inShadow2(`(sr) => !!sr.querySelector('[data-oneclick]')`) });
+  await inShadow2(`(sr) => sr.querySelector('[data-oneclick]').click()`);
   await agc.waitForTimeout(1200);
   const inner = agc.frameLocator("iframe");
   step("huawei open-create", {
@@ -133,14 +134,14 @@ try {
   await agc.waitForTimeout(1500);
   step("huawei captured", await inShadow2(`(sr) => ({ file: (sr.querySelector('.file .name')||{}).textContent, msg: (sr.querySelector('.msg')||{}).textContent })`));
   await agc.screenshot({ path: path.join(HERE, "../../dist/shots/06-huawei-captured.png") });
-  await inShadow2(`(sr) => sr.querySelector('[data-act=save]').click()`);
+  // 一键流程里保存是自动的：这里不点保存，只等结果
   await agc.waitForTimeout(1500);
   const received2 = await (await fetch(`${ORIGIN}/__received`)).json();
   const last = received2[received2.length - 1];
   const sa = last && last.body && last.body.config && last.body.config.service_account;
   const decoded = sa ? JSON.parse(Buffer.from(sa, "base64").toString("utf8")) : null;
   step("huawei saved", { msg: await inShadow2(`(sr) => (sr.querySelector('.msg')||{}).textContent`), store: last && last.body.store_name, jsonKeys: decoded && Object.keys(decoded), name: decoded && decoded.name, roles: decoded && decoded.roles });
-  if (!decoded || decoded.name !== "apkgo" || !decoded.roles.includes("app")) throw new Error("华为半自动没有把下载的 JSON 送到服务端");
+  if (!decoded || decoded.name !== "apkgo" || !decoded.roles.includes("app")) throw new Error("华为一键流程没有自动把下载的 JSON 保存到服务端");
 
   // 8. 弹窗页能打开、显示已连接
   const popup = await ctx.newPage();

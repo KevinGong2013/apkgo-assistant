@@ -28,6 +28,8 @@ const APKGO_RECIPES = [
       { key: "service_account", label: "服务账号 JSON 文件", kind: "file-b64", accept: ".json,application/json", required: true, capture: { name: /\.json$/i, mime: /json/i } },
     ],
     // AGC 正文在同源 iframe 里，Element UI：.el-dialog / .el-radio / .el-checkbox / .el-button。
+    // 「一键获取密钥」按 flow 顺序跑；弹窗上的「确认」留给用户，之后抓下载 → 自动保存验证。
+    flow: ["open-create"],
     actions: {
       "open-create": async (h) => {
         let dlg = h.byText(".el-dialog", /创建Service Account/);
@@ -45,8 +47,9 @@ const APKGO_RECIPES = [
         const cb = h.byText(".el-checkbox", /^APP管理员$/, dlg);
         if (cb && !cb.querySelector("input:checked")) cb.click();
         const ok = h.byText("button", /^确认$/, dlg);
-        if (ok) h.highlight(ok);
-        return "已填好：名称 apkgo、类型「开发者级」、角色「APP管理员」。请核对后点绿框里的「确认」，下载的 JSON 会自动进面板。";
+        if (!ok) throw new Error("弹窗里没找到「确认」按钮。");
+        h.highlight(ok);
+        return "已填好：名称 apkgo、类型「开发者级」、角色「APP管理员」。请核对后点绿框里的「确认」，剩下的交给我：抓到下载的 JSON 就自动保存并验证。";
       },
     },
   },

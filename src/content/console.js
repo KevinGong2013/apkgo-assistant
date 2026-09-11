@@ -64,7 +64,10 @@
     const preHtml = recipe.prereq.length
       ? `<div class="sec"><div class="sec-t">先确认</div><ul class="pre">${recipe.prereq.map((p) => `<li>${esc(p)}</li>`).join("")}</ul></div>` : "";
 
-    const stepsHtml = `<div class="sec"><div class="sec-t">在 ${esc(recipe.product)} 里</div><ol class="steps">${recipe.steps.map((s, i) => `<li><span class="n">${i + 1}</span><div style="flex:1;min-width:0"><div class="st">${esc(s.t)}</div>${s.d ? `<div class="sd">${esc(s.d)}</div>` : ""}</div>${s.action ? `<button class="mini ${busyAction === s.action ? "on" : ""}" data-action="${esc(s.action)}" ${busyAction ? "disabled" : ""}>${busyAction === s.action ? "正在点…" : "帮我点"}</button>` : ""}</li>`).join("")}</ol></div>`;
+    const oneClick = recipe.flow && recipe.flow.length
+      ? `<div class="oneclick"><button class="btn acc" data-oneclick="1" ${busyAction || !paired ? "disabled" : ""}>${busyAction ? "正在替你点…" : "一键获取密钥"}</button><div class="hint">扩展会跳到密钥页、打开创建弹窗并填好；唯一留给你的是弹窗上的「确认」。之后下载、保存、验证都自动完成。</div></div>`
+      : "";
+    const stepsHtml = `<div class="sec"><div class="sec-t">在 ${esc(recipe.product)} 里</div>${oneClick}<ol class="steps">${recipe.steps.map((s, i) => `<li><span class="n">${i + 1}</span><div style="flex:1;min-width:0"><div class="st">${esc(s.t)}</div>${s.d ? `<div class="sd">${esc(s.d)}</div>` : ""}</div>${s.action ? `<button class="mini ${busyAction === s.action ? "on" : ""}" data-action="${esc(s.action)}" ${busyAction ? "disabled" : ""}>${busyAction === s.action ? "正在点…" : "帮我点"}</button>` : ""}</li>`).join("")}</ol></div>`;
 
     let formHtml = "";
     if (hasFields) {
@@ -114,13 +117,14 @@
 
   // ---- events (delegated) ----
   panel.addEventListener("click", async (e) => {
-    const t = e.target.closest("[data-act],[data-pick],[data-eye],[data-unfile],[data-action]");
+    const t = e.target.closest("[data-act],[data-pick],[data-eye],[data-unfile],[data-action],[data-oneclick]");
     if (!t) return;
     if (t.dataset.act === "close") return togglePanel(false);
     if (t.dataset.act === "auto") return autoDetect();
     if (t.dataset.act === "clear") { draft = { label: "", config: {}, files: {}, appId: draft.appId }; result = null; await saveDraft(); return render(); }
     if (t.dataset.act === "save") return submit();
     if (t.dataset.action) return runAction(t.dataset.action);
+    if (t.dataset.oneclick) return oneClick();
     if (t.dataset.pick) return startPick(t.dataset.pick);
     if (t.dataset.eye) { const inp = panel.querySelector(`input[data-k="${t.dataset.eye}"]`); if (inp) { inp.type = inp.type === "password" ? "text" : "password"; t.textContent = inp.type === "password" ? "显示" : "隐藏"; } return; }
     if (t.dataset.unfile) { delete draft.config[t.dataset.unfile]; delete draft.files[t.dataset.unfile]; await saveDraft(); return render(); }
@@ -352,13 +356,17 @@
     while (Date.now() < end) { const v = fn(); if (v) return v; await wait(120); }
     return null;
   }
+  function onConsolePage() {
+    const target = new URL(recipe.console);
+    return location.href.split("#")[0] === recipe.console.split("#")[0] && (!target.hash || location.hash === target.hash);
+  }
   async function runAction(id) {
     if (id === "goto") {
-      if (location.href.split("#")[0] !== recipe.console.split("#")[0] || location.hash !== new URL(recipe.console).hash) { location.href = recipe.console; return; }
-      result = { kind: "ok", html: "已经在这一页了。" }; return render();
+      if (!onConsolePage()) { location.href = recipe.console; return false; }
+      result = { kind: "ok", html: "已经在这一页了。" }; render(); return true;
     }
     const fn = recipe.actions && recipe.actions[id];
-    if (!fn) return;
+    if (!fn) return false;
     busyAction = id; result = null; render();
     try {
       await ensureHook();
@@ -368,11 +376,28 @@
       // 让位：面板可能正盖着页面上要点的按钮。
       togglePanel(false);
       showNotice(esc(msg || "已完成。"));
-      return;
+      return true;
     } catch (e) {
       result = { kind: "warn", html: esc(e.message || String(e)) };
     }
     busyAction = ""; render();
+    return false;
+  }
+
+  // 一键获取 = 按配方的 flow 依次跑 actions；不在入口页就先跳过去，落地后接着跑
+  // （标记放 session）。流程里唯一留给用户的是后台弹窗上的「确认」——那一下真正
+  // 在对方账号里创建密钥，扩展不替用户点。之后下载抓取 → 保存 → 验证自动完成。
+  let autoSave = false;
+  async function oneClick() {
+    const flow = recipe.flow || [];
+    if (!flow.length) return;
+    if (!onConsolePage()) {
+      try { await chrome.storage.session.set({ [APKGO.KEY_PENDING]: recipe.id, ["autorun:" + recipe.id]: true }); } catch { /* ignore */ }
+      location.href = recipe.console;
+      return;
+    }
+    autoSave = true;
+    for (const id of flow) { if (!(await runAction(id))) { autoSave = false; return; } }
   }
 
   // ---- 下载自动抓取：页面一下载密钥文件，直接填进对应的文件字段 ----
@@ -400,10 +425,11 @@
     draft.config[f.key] = f.kind === "file-text" ? text : btoa(unescape(encodeURIComponent(text)));
     draft.files[f.key] = name || "下载的文件";
     await saveDraft();
-    result = { kind: "ok", html: `已自动抓到下载的 ${esc(name || "文件")}，填进了「${esc(f.label)}」。核对后点保存。` };
+    result = { kind: "ok", html: `已自动抓到下载的 ${esc(name || "文件")}，填进了「${esc(f.label)}」。${autoSave ? "正在保存并验证…" : "核对后点保存。"}` };
     hideNotice();
     togglePanel(true);
     render();
+    if (autoSave) { autoSave = false; submit(); }
   }
   chrome.runtime.onMessage.addListener((msg) => {
     if (msg && msg.type === "download-created" && recipe.fields.some((f) => f.capture)) {
@@ -446,8 +472,9 @@
     await loadDraft();
     render();
     try {
-      const { [APKGO.KEY_PENDING]: pending } = await chrome.storage.session.get(APKGO.KEY_PENDING);
+      const { [APKGO.KEY_PENDING]: pending, ["autorun:" + recipe.id]: autorun } = await chrome.storage.session.get([APKGO.KEY_PENDING, "autorun:" + recipe.id]);
       if (pending === recipe.id) { await chrome.storage.session.remove(APKGO.KEY_PENDING); togglePanel(true); }
+      if (autorun) { await chrome.storage.session.remove("autorun:" + recipe.id); togglePanel(true); await refreshState(); await wait(1500); oneClick(); }
     } catch { /* ignore */ }
   })();
 })();

@@ -26,6 +26,8 @@ const APKGO_PANEL_CSS = `
 .conn a { color: #18E299; text-decoration: none; }
 .pre { margin: 0; padding: 0 0 0 16px; color: #C9D6D0; font-size: 12px; }
 .pre li { margin: 2px 0; }
+.oneclick { margin: 2px 0 12px; }
+.oneclick .btn { width: 100%; }
 .steps { list-style: none; margin: 0; padding: 0; }
 .steps li { display: flex; gap: 9px; align-items: flex-start; padding: 6px 0; }
 .steps .n { width: 18px; height: 18px; border-radius: 50%; border: 1.5px solid rgba(255,255,255,.18); font-size: 10px; font-weight: 600; color: #8FA39A; display: grid; place-items: center; flex-shrink: 0; margin-top: 2px; }
