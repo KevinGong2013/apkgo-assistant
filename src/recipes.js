@@ -42,22 +42,46 @@ const APKGO_RECIPES = [
         }
         const name = dlg.querySelector('input.el-input__inner[type="text"]');
         if (name && !name.value) h.setInput(name, "apkgo");
-        // 单选/多选按「去掉空白、不分大小写」的文字找，AGC 的标签偶尔带空格或大小写不一。
+        // 单选/多选按「去掉空白、不分大小写」的文字找。AGC 的角色一栏不是标准
+        // .el-checkbox（实登时 querySelectorAll 为空），所以退一步：找文字正好是
+        // 「APP管理员」的元素，点它最近的可点击容器；勾没勾上从 input / aria-checked /
+        // class 三种信号判断，没信号就假定没勾、点一次并提醒核对。
         const norm = (t) => String(t || "").replace(/\s+/g, "").toLowerCase();
-        const pick = (sel, want) => [...dlg.querySelectorAll(sel)].find((el) => norm(h.textOf(el)) === want && el.getClientRects().length);
-        const radio = pick(".el-radio", "开发者级");
-        if (radio && !radio.querySelector("input:checked")) radio.click();
-        const cb = pick(".el-checkbox", "app管理员");
-        if (!cb) throw new Error("弹窗里没找到「APP管理员」角色，请手动勾上。可选角色：" + [...dlg.querySelectorAll(".el-checkbox")].map((x) => h.textOf(x)).join("、"));
-        if (!cb.querySelector("input:checked")) {
-          cb.click();
-          await h.wait(150);
-          if (!cb.querySelector("input:checked")) { const inp = cb.querySelector("input"); if (inp) inp.click(); }
+        const findText = (want) => {
+          const els = [...dlg.querySelectorAll("*")].filter((el) => el.children.length <= 2 && norm(h.textOf(el)) === want && el.getClientRects().length);
+          const el = els[els.length - 1];
+          if (!el) return null;
+          return el.closest('label, [role="checkbox"], [role="radio"], .el-checkbox, .el-radio, [class*="checkbox"], [class*="radio"], [class*="check"], li') || el.parentElement || el;
+        };
+        const state = (t) => {
+          const inp = t.querySelector('input[type="checkbox"], input[type="radio"]');
+          if (inp) return inp.checked;
+          const ariaEl = t.hasAttribute("aria-checked") ? t : t.querySelector("[aria-checked]");
+          if (ariaEl) return ariaEl.getAttribute("aria-checked") === "true";
+          if (/is-checked|checked|is-active|active|selected/i.test(t.className)) return true;
+          if (t.querySelector('[class*="is-checked"], [class*="checked"], [class*="active"], [class*="selected"]')) return true;
+          return null; // 看不出来
+        };
+        const notes = [];
+        const radio = findText("开发者级");
+        if (radio && state(radio) !== true) radio.click();
+        const cb = findText("app管理员");
+        if (!cb) {
+          const roleLabel = [...dlg.querySelectorAll("*")].find((el) => el.children.length <= 2 && /^角色/.test(h.textOf(el)));
+          const box = roleLabel ? (roleLabel.closest(".el-form-item") || roleLabel.parentElement) : null;
+          const opts = box ? [...box.querySelectorAll("*")].filter((el) => !el.children.length && h.textOf(el) && h.textOf(el).length <= 8 && !/^角色/.test(h.textOf(el))).map((el) => h.textOf(el)) : [];
+          notes.push("没找到「APP管理员」角色，请在弹窗里手动勾上" + (opts.length ? "（看到的选项：" + [...new Set(opts)].join("、") + "）" : ""));
+        } else {
+          const before = state(cb);
+          if (before !== true) { cb.click(); await h.wait(150); }
+          const after = state(cb);
+          if (after === false) { const inp = cb.querySelector("input"); if (inp) { inp.click(); await h.wait(100); } }
+          if (state(cb) !== true) notes.push("已点「APP管理员」，请在弹窗里确认它勾上了");
         }
         const ok = h.byText("button", /^确认$/, dlg);
         if (!ok) throw new Error("弹窗里没找到「确认」按钮。");
         h.highlight(ok);
-        return "已填好：名称 apkgo、类型「开发者级」、角色「APP管理员」。请核对后点绿框里的「确认」，剩下的交给我：抓到下载的 JSON 就自动保存并验证。";
+        return (notes.length ? "⚠️ " + notes.join("；") + "。然后" : "已填好：名称 apkgo、类型「开发者级」、角色「APP管理员」。请核对后") + "点绿框里的「确认」，剩下的交给我：抓到下载的 JSON 就自动保存并验证。";
       },
     },
   },
