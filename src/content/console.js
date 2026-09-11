@@ -10,7 +10,8 @@
   if (!recipe) return;
   if (document.getElementById("apkgo-assistant-root")) return;
 
-  const MARK = '<svg viewBox="0 0 100 100" fill="currentColor"><rect x="18" y="70" width="64" height="13" rx="6.5"/><rect x="18" y="51" width="64" height="13" rx="6.5"/><rect x="22" y="26" width="56" height="13" rx="6.5"/></svg>';
+  // viewBox 收紧到正好框住三根横条（x18–82、y26–83），水平垂直居中，去掉原 100×100 画布顶部的空白。
+  const MARK = '<svg viewBox="12 16.5 76 76" fill="currentColor"><rect x="18" y="70" width="64" height="13" rx="6.5"/><rect x="18" y="51" width="64" height="13" rx="6.5"/><rect x="22" y="26" width="56" height="13" rx="6.5"/></svg>';
   const DRAFT_KEY = APKGO.KEY_DRAFT(recipe.id);
 
   // ---- state ----
