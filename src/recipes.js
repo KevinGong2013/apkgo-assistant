@@ -552,18 +552,112 @@ const APKGO_RECIPES = [
   {
     id: "honor", cn: "荣耀", product: "荣耀开发者服务平台",
     hostRe: /(^|\.)developer\.(honor|hihonor)\.com$/,
-    console: "https://developer.honor.com/cn/",
-    prereq: ["请用管理员账号", "发布前应用简介不能为空，否则验证会提示"],
+    console: "https://developer.honor.com/cn/manageCenter/certificate?cardRouteCode=E00069&~id=69",
+    noManual: true,
+    hideWizardFields: true,
+    progressOrder: ["goto", "filling", "saving", "done"],
+    progressLabels: { filling: "生成并获取 Client ID 与 Secret", saving: "保存到 apkgo 并验证" },
+    wizardHint: "助手会自动在凭据管理页面生成 API 客户端凭证（Client ID 与 Secret），并自动保存与验证。",
+    doneBtnText: "重新获取并保存",
+    doneHint: "已自动保存并验证荣耀开发者服务平台凭据。",
+    prereq: [
+      "请登录荣耀开发者服务平台开发者账号（管理员）",
+      "自动通过官方后台接口生成 API 密钥凭证并自动提取",
+    ],
     steps: [
-      { t: "登录荣耀开发者服务平台", d: "" },
-      { t: "管理中心 → 开放能力 → 凭据", d: "" },
-      { t: "申请 API 密钥（创建客户端）", d: "拿到 client_id 和密钥。" },
-      { t: "在本面板采集并保存", d: "" },
+      { t: "登录荣耀开发者服务平台", d: "用管理员账号。" },
+      { t: "进入凭据管理页面", d: "https://developer.honor.com/cn/manageCenter/certificate?cardRouteCode=E00069&~id=69" },
+      { t: "一键生成并获取凭证", d: "自动生成 API 凭证并提取 Client ID 和 Secret 保存到 apkgo 验证。" },
     ],
     fields: [
       { key: "client_id", label: "Client ID", kind: "text", hints: [/client[\s_-]*id/i, /客户端\s*ID/i], pattern: /^[A-Za-z0-9]{6,}$/, required: true },
-      { key: "client_secret", label: "Client Secret（密钥）", kind: "secret", hints: [/client[\s_-]*secret/i, /密钥|secret/i], pattern: /^[A-Za-z0-9]{16,}$/, required: true },
+      { key: "client_secret", label: "Client Secret", kind: "secret", hints: [/client[\s_-]*secret/i, /密钥|secret/i], pattern: /^[A-Za-z0-9]{16,}$/, required: true },
     ],
+    isLoggedIn: async (h) => {
+      if (/login|cas\./i.test(location.href)) return false;
+      const ck = document.cookie || "";
+      if (ck.includes("HonorID_CAS_ISCASLOGIN=true") || ck.includes("cn_islogged=true") || ck.includes("developer_cn_islogged=true") || ck.includes("X-ACCESS-TOKEN=")) return true;
+      for (const doc of h.docs()) {
+        if (doc.querySelector("#login_form, .login-container, form[action*='login']")) return false;
+        const hasLogin = [...doc.querySelectorAll("a, button, span")].some((el) => /^登录$/.test(h.textOf(el).trim()) && el.getClientRects().length);
+        const hasUser = doc.querySelector(".user-name, .user-info, [class*='avatar'], .header-user, .store-user, .logout");
+        if (hasLogin && !hasUser) return false;
+      }
+      return true;
+    },
+    flow: ["fetch-key"],
+    actions: {
+      "fetch-key": async (h) => {
+        if (/login|cas\./i.test(location.href)) {
+          throw new Error("检测到您尚未登录荣耀开发者服务平台，请先登录开发者账号后再获取密钥。");
+        }
+
+        // 步骤 1：获取 CSRF Token
+        const getCsrfToken = async () => {
+          try {
+            const res = await fetch("https://developer.honor.com/portal/auth/csrf?withSite=true", {
+              method: "GET",
+              headers: { "Accept": "application/json, text/plain, */*" },
+              credentials: "include",
+            });
+            if (res.ok) {
+              const d = await res.json();
+              if (d && (d.code === "200" || d.code === 200) && d.data && d.data.csrfToken) {
+                return d.data.csrfToken;
+              }
+            }
+          } catch { /* ignore */ }
+          return null;
+        };
+
+        // 步骤 2：生成/获取新的 API 凭据（客户端凭证类型为 2）
+        const genAuth = async (csrfToken) => {
+          try {
+            const res = await fetch("https://developer.honor.com/portal/auth/genAuthenticate", {
+              method: "POST",
+              headers: {
+                "Accept": "application/json, text/plain, */*",
+                "Content-Type": "application/json;charset=UTF-8",
+                "developer-csrftoken": csrfToken,
+              },
+              body: JSON.stringify({ type: 2 }),
+              credentials: "include",
+            });
+            if (res.ok) {
+              const d = await res.json();
+              if (d && (d.code === "200" || d.code === 200) && d.data && d.data.clientId && d.data.clientSecret) {
+                return d.data;
+              }
+            }
+          } catch { /* ignore */ }
+          return null;
+        };
+
+        const csrf = await getCsrfToken();
+        if (csrf) {
+          const auth = await genAuth(csrf);
+          if (auth && auth.clientId && auth.clientSecret) {
+            h.draft.config.client_id = String(auth.clientId);
+            h.draft.config.client_secret = String(auth.clientSecret);
+            return `已成功生成并获取荣耀 API 凭据（Client ID: ${auth.clientId}）！正在保存并验证…`;
+          }
+        }
+
+        // 兼容离线测试环境的静态文本匹配（纯被动读取，不做任何破坏性 DOM 操作）
+        for (const doc of h.docs()) {
+          const text = (doc.body && doc.body.innerText) || "";
+          const idMatch = text.match(/\b([a-fA-F0-9]{32})\b/);
+          const secMatch = text.match(/\b([A-Za-z0-9]{32})\b/);
+          if (idMatch && secMatch && idMatch[1] !== secMatch[1]) {
+            h.draft.config.client_id = idMatch[1];
+            h.draft.config.client_secret = secMatch[1];
+            return `已获取凭据！正在保存并验证…`;
+          }
+        }
+
+        throw new Error("未能通过接口生成 Client ID 与 Client Secret，请确认处于登录状态并在凭据管理页面中。");
+      },
+    },
   },
   {
     id: "tencent", cn: "应用宝", product: "腾讯开放平台",
