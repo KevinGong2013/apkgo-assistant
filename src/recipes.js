@@ -237,11 +237,12 @@ const APKGO_RECIPES = [
     hostRe: /(^|\.)open\.oppomobile\.com$/,
     console: "https://open.oppomobile.com/new/api/myapi",
     noManual: true,
+    hideWizardFields: true,
     progressOrder: ["goto", "filling", "saving", "done"],
     progressLabels: { filling: "自动获取 Client ID 与 Secret", saving: "保存到 apkgo 并验证" },
-    wizardHint: "助手会自动在「我的API」中获取或创建服务端应用，提取 Client ID 和 Secret，并自动保存与验证。",
-    doneBtnText: "新建应用并重新保存",
-    doneHint: "已自动保存并验证 OPPO 开放平台凭据。如需更换应用密钥，可点击重新创建获取。",
+    wizardHint: "助手会自动在「我的API」中获取服务端应用，提取 Client ID 和 Secret，并自动保存与验证。",
+    doneBtnText: "重新获取并保存",
+    doneHint: "已自动保存并验证 OPPO 开放平台凭据。",
     prereq: [
       "请登录 OPPO 开放平台开发者账号（主账号或管理员）",
       "自动在「我的API」获取或创建服务端应用并提取 Client ID 和 Secret",
@@ -329,19 +330,19 @@ const APKGO_RECIPES = [
 
         let serverApps = await listServerApps();
 
-        // 非重置模式下，若已存在现成服务端应用，直接使用
-        if (!h.isReset && serverApps && serverApps.length > 0) {
+        // 只要已存在服务端应用，直接使用现有应用，不重复创建
+        if (serverApps && serverApps.length > 0) {
           const target = serverApps.find((r) => /^apkgo/i.test(r.client_name)) || serverApps[0];
           if (target && target.client_id && target.client_secret) {
             h.draft.config.client_id = String(target.client_id);
             h.draft.config.client_secret = String(target.client_secret);
-            return `已通过后台接口秒级获取应用「${target.client_name}」凭据！正在保存并验证…`;
+            return `已获取服务端应用「${target.client_name}」凭据！正在保存并验证…`;
           }
         }
 
-        // 重置模式或尚无应用时，直接调接口创建新应用
-        if (h.isReset || (serverApps && serverApps.length === 0)) {
-          const appName = h.isReset ? `apkgo_${Date.now().toString(36).slice(-4)}` : "apkgo";
+        // 仅在完全没有服务端应用时，才通过接口自动创建一个应用
+        if (!serverApps || serverApps.length === 0) {
+          const appName = "apkgo";
           const added = await addServerApp(appName);
           if (added) {
             await h.wait(400);
@@ -350,7 +351,7 @@ const APKGO_RECIPES = [
             if (target && target.client_id && target.client_secret) {
               h.draft.config.client_id = String(target.client_id);
               h.draft.config.client_secret = String(target.client_secret);
-              return `已通过后台接口创建应用「${target.client_name}」并获取凭据！正在保存并验证…`;
+              return `已自动创建应用「${target.client_name}」并获取凭据！正在保存并验证…`;
             }
           }
         }
