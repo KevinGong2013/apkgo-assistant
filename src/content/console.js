@@ -448,9 +448,19 @@
     if (!d || d.source !== "apkgo-assistant-hook" || d.type !== "download") return;
     ingestDownload(d.name, d.mime, d.text);
   }
+  // 同一次下载可能被多条路径各抓一遍（blob 钩子、fetch/XHR 钩子、浏览器下载事件），
+  // 按内容指纹去重；刚保存成功的那份再抓到也不再往表单里填，免得用户二次保存撞上
+  // 「同一组鉴权信息只能添加到一个账号下」。
+  const fingerprint = (t) => { let h = 0; for (let i = 0; i < t.length; i++) h = (h * 31 + t.charCodeAt(i)) | 0; return `${t.length}:${h}`; };
+  let lastCapture = "";
+  let lastSaved = "";
   async function ingestDownload(name, mime, text) {
     const f = recipe.fields.find((x) => x.capture && ((x.capture.name && x.capture.name.test(name || "")) || (x.capture.mime && x.capture.mime.test(mime || ""))));
     if (!f || !text) return;
+    const fp = fingerprint(text);
+    if (fp === lastSaved) { result = { kind: "ok", html: `这份 ${esc(name || "文件")} 刚才已经保存到 apkgo 了，不用再存。` }; togglePanel(true); render(); return; }
+    if (fp === lastCapture) return;
+    lastCapture = fp;
     draft.config[f.key] = f.kind === "file-text" ? text : btoa(unescape(encodeURIComponent(text)));
     draft.files[f.key] = name || "下载的文件";
     await saveDraft();
@@ -458,7 +468,7 @@
     hideNotice();
     togglePanel(true);
     render();
-    if (autoSave) { autoSave = false; submit(); }
+    if (autoSave) { autoSave = false; submit(fp); }
   }
   chrome.runtime.onMessage.addListener((msg) => {
     if (msg && msg.type === "download-created" && recipe.fields.some((f) => f.capture)) {
@@ -467,7 +477,8 @@
   });
 
   // ---- submit ----
-  async function submit() {
+  async function submit(capturedFp) {
+    if (busy) return;
     const missing = recipe.fields.filter((f) => f.required && !draft.config[f.key]);
     if (missing.length) { result = { kind: "warn", html: "还差：" + missing.map((f) => esc(f.label)).join("、") }; return render(); }
     busy = true; result = null; render();
@@ -481,6 +492,7 @@
       result = r.credential.verified
         ? { kind: "ok", html: `已保存，${esc(recipe.cn)}验证通过。${link}，或者继续采集下一家。` }
         : { kind: "ok", html: `已保存。${esc(recipe.cn)}这次没能完成验证（接口没探到或被跳过），发布时仍会用它。${link}` };
+      if (capturedFp) lastSaved = capturedFp;
       await clearDraft();
       launch.classList.remove("has-draft");
     } else {

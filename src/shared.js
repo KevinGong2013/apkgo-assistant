@@ -18,7 +18,7 @@ const APKGO = {
     if (/intro .*is empty|应用简介/i.test(m)) return "荣耀要求应用简介不能为空，先在后台把简介填上。";
     if (/token|access_token|invalid_client|401|签名|signature|secret/i.test(m)) return "密钥对不上：回到后台核对是否完整复制，或者密钥是否刚被重置过。";
     if (/配额|上限|quota|limit/i.test(m)) return "商店账号数量已到套餐上限，在 apkgo 升级套餐或删掉不用的账号。";
-    if (/已存在|duplicate|conflict/i.test(m)) return "这组密钥已经在 apkgo 里了，不用重复添加。";
+    if (/已存在|已被使用|鉴权信息|duplicate|conflict/i.test(m)) return "这组密钥已经在 apkgo 里了（多半是刚才那次已经自动保存成功），不用重复添加；去 apkgo「商店账号」里能看到。";
     if (/permission|权限/i.test(m)) return "连接用的密钥权限不对，回到 apkgo 添加页重新连接一次。";
     return "";
   },

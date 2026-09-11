@@ -42,10 +42,18 @@ const APKGO_RECIPES = [
         }
         const name = dlg.querySelector('input.el-input__inner[type="text"]');
         if (name && !name.value) h.setInput(name, "apkgo");
-        const radio = h.byText(".el-radio", /^开发者级$/, dlg);
+        // 单选/多选按「去掉空白、不分大小写」的文字找，AGC 的标签偶尔带空格或大小写不一。
+        const norm = (t) => String(t || "").replace(/\s+/g, "").toLowerCase();
+        const pick = (sel, want) => [...dlg.querySelectorAll(sel)].find((el) => norm(h.textOf(el)) === want && el.getClientRects().length);
+        const radio = pick(".el-radio", "开发者级");
         if (radio && !radio.querySelector("input:checked")) radio.click();
-        const cb = h.byText(".el-checkbox", /^APP管理员$/, dlg);
-        if (cb && !cb.querySelector("input:checked")) cb.click();
+        const cb = pick(".el-checkbox", "app管理员");
+        if (!cb) throw new Error("弹窗里没找到「APP管理员」角色，请手动勾上。可选角色：" + [...dlg.querySelectorAll(".el-checkbox")].map((x) => h.textOf(x)).join("、"));
+        if (!cb.querySelector("input:checked")) {
+          cb.click();
+          await h.wait(150);
+          if (!cb.querySelector("input:checked")) { const inp = cb.querySelector("input"); if (inp) inp.click(); }
+        }
         const ok = h.byText("button", /^确认$/, dlg);
         if (!ok) throw new Error("弹窗里没找到「确认」按钮。");
         h.highlight(ok);
