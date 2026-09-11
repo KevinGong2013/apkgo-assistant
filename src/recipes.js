@@ -67,6 +67,8 @@ const APKGO_RECIPES = [
           return null; // 看不出来
         };
         const notes = [];
+        // 角色一栏（.el-checkbox-group）是弹窗打开后异步加载的，等它渲染出来再勾。
+        await h.waitFor(() => [...dlg.querySelectorAll(".el-checkbox")].some((x) => norm(h.textOf(x)) === "app管理员"), 6000);
         const radio = findText("开发者级");
         if (radio && state(radio) !== true) radio.click();
         const cb = findText("app管理员");
