@@ -5,7 +5,7 @@ const APKGO_PANEL_CSS = `
 * { box-sizing: border-box; }
 /* 启动按钮：底部偏右居中的药丸，带文字，出现时滑入 + 绿色光环脉冲 + 弹跳几下，
    用户点开一次（本会话）后就安静。面板打开时隐藏，避免互相遮挡。 */
-.launch { position: fixed; left: 62%; bottom: 28px; transform: translateX(-50%); z-index: 2147483000; height: 54px; padding: 0 22px 0 14px; border-radius: 9999px; border: none; background: #0F1613; color: #fff; display: flex; align-items: center; gap: 10px; cursor: pointer; font: 600 14px/1 Inter, -apple-system, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif; white-space: nowrap; box-shadow: 0 10px 30px rgba(0,0,0,.35), inset 0 0 0 1px rgba(24,226,153,.35); transition: transform .15s, box-shadow .15s; }
+.launch { position: fixed; left: 62%; bottom: 72px; transform: translateX(-50%); z-index: 2147483000; height: 54px; padding: 0 22px 0 14px; border-radius: 9999px; border: none; background: #0F1613; color: #fff; display: flex; align-items: center; gap: 10px; cursor: pointer; font: 600 14px/1 Inter, -apple-system, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif; white-space: nowrap; box-shadow: 0 10px 30px rgba(0,0,0,.35), inset 0 0 0 1px rgba(24,226,153,.35); transition: transform .15s, box-shadow .15s; }
 .launch:hover { transform: translate(-50%, -2px); box-shadow: 0 14px 34px rgba(0,0,0,.4), 0 0 0 4px rgba(24,226,153,.18), inset 0 0 0 1px rgba(24,226,153,.6); }
 .launch svg { width: 26px; height: 26px; color: #18E299; flex-shrink: 0; }
 .launch .lbl { text-align: left; }
