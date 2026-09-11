@@ -6,20 +6,20 @@ Chrome / Edge 扩展。打开华为、小米、OPPO、vivo、荣耀、应用宝�
 
 ## 支持的商店
 
-| 商店 | 采集 | 说明 |
+| 商店 | 方式 | 状态（2026-09-11） |
 |---|---|---|
-| 华为 AppGallery | 服务账号 JSON 文件 | 需团队管理员 |
-| 小米 | 邮箱、私钥、公钥证书文件 | 需主账号，首次通常要联系客服开通 |
-| OPPO | client_id / client_secret | 需企业开发者，团队账号用管理员登录 |
-| vivo | access_key / access_secret | 需主账号 |
-| 荣耀 | client_id / client_secret | |
-| 应用宝 | user_id / access_secret / app_id | API 发布接口要申请开通并等审核 |
-| 魅族 | client_id / client_secret | |
-| Samsung | Service Account ID / 私钥 PEM / Content ID | |
-| App Store | Issuer ID / Key ID / .p8 | 需 Account Holder 或 Admin |
-| Google Play | 仅引导 | 请在 apkgo 添加页上传服务账号 JSON |
+| 华为 AppGallery | **一键获取**：跳到 Connect API → 打开创建 Service Account 弹窗并填好（开发者级 · APP管理员）→ 你点「确认」→ 抓到下载的 JSON → 自动保存验证 | ✅ 真实后台跑通 |
+| 小米 | 采集：邮箱、私钥、公钥证书文件 | ⚠️ 步骤按文档写，未实登核对 |
+| OPPO | 采集：client_id / client_secret（自动识别或点选） | ⚠️ 未实登核对 |
+| vivo | 采集：access_key / access_secret | ⚠️ 未实登核对 |
+| 荣耀 | 采集：client_id / client_secret | ⚠️ 未实登核对 |
+| 应用宝 | 采集：user_id / access_secret / app_id | ⚠️ 未实登核对 |
+| 魅族 | 采集：client_id / client_secret | ⚠️ 未实登核对 |
+| Samsung | 采集：Service Account ID / 私钥 PEM / Content ID | ⚠️ 未实登核对 |
+| App Store | 采集：Issuer ID / Key ID / .p8 | ⚠️ 未实登核对 |
+| Google Play | 仅引导，请在 apkgo 添加页上传 JSON | — |
 
-各家后台会改版，菜单名和入口以实际为准。发现对不上，改 [`src/recipes.js`](src/recipes.js) 提个 PR 就行，一家商店就是一个对象。
+「未实登核对」的商店，面板里的菜单名和入口 URL 来自官方文档与社区教程，改版了对不上就改 [`src/recipes.js`](src/recipes.js)，一家商店就是一个对象。华为这套「一键获取」机制是通用的，其他商店补上 `flow` 和 `actions` 就能用同样的方式。
 
 ## 安装
 
@@ -32,6 +32,45 @@ Chrome / Edge 扩展。打开华为、小米、OPPO、vivo、荣耀、应用宝�
 2. 点 **「前往 X 后台采集」**，或者自己打开那家后台。页面右下角出现绿色助手按钮。
 3. 面板顶上有「一键获取密钥」：扩展跳到密钥页、打开创建弹窗并填好名称和角色，**唯一留给你的是弹窗上的「确认」**（那一下真正在你的账号里创建密钥，扩展不替你点）。之后页面一下载密钥文件，面板自动抓到、自动保存并验证，不用选文件也不用再点保存。每一步旁边也有单独的「帮我点」。走到显示密钥的那一页，点「自动识别本页」，或者对每个字段点「点选」再点页面上的值；文件类的密钥（华为 JSON、小米证书、.p8）直接选文件。
 4. 点 **「保存到 apkgo 并验证」**。apkgo 会连一次该商店确认密钥可用，结果就地显示；失败会给出下一步该做什么。
+
+## 一键获取密钥是怎么工作的
+
+以华为为例，点「一键获取密钥」后：
+
+1. **跳页**：不在密钥页就先跳到 `用户与访问 → API密钥 → Connect API`，落地后自动继续。
+2. **填弹窗**：在同源 iframe 里找到「创建」按钮点开，等异步渲染的角色列表出现，填名称、选「开发者级」、勾「APP管理员」，把「确认」按钮描上绿框。面板收起让位，提示挪到页面顶部。
+3. **你点「确认」**：这是整个流程里唯一留给用户的动作，它真正在你的开发者账号里创建密钥，扩展不替你点。
+4. **抓下载**：扩展事先在页面主世界挂了钩子（`chrome.scripting` MAIN world），覆盖 blob、`<a download>`、带 attachment 头的 fetch / XHR，外加 `chrome.downloads` 事件；AGC 一下载 JSON，内容直接进面板，不用选文件。同一次下载被多条路径抓到会按内容去重。
+5. **自动保存验证**：调 apkgo 新建凭证，服务端连华为验证一次，结果显示在面板进度里。
+
+失败时面板底部的「手动模式」会自动展开：完整步骤、每步单独的「帮我点」、自动识别、点选、选文件都在里面。
+
+## 写一份配方
+
+`src/recipes.js` 里每家商店一个对象：
+
+```js
+{
+  id: "oppo", cn: "OPPO", product: "OPPO 开放平台",
+  hostRe: /(^|\.)open\.oppomobile\.com$/,     // 在哪些域名上注入
+  console: "https://open.oppomobile.com/",      // 密钥页入口（「跳到密钥页」用）
+  prereq: ["需要企业开发者账号"],                 // 前置条件
+  steps: [{ t: "管理中心 → API 密钥管理", d: "说明", action: "open-create" }],  // 带 action 的步骤旁边有「帮我点」
+  fields: [
+    { key: "client_id", label: "Client ID", kind: "text", hints: [/client[\s_-]*id/i], pattern: /^\d{4,}$/, required: true },
+    { key: "service_account", label: "JSON 文件", kind: "file-b64", capture: { name: /\.json$/i } },  // capture：下载自动抓取
+  ],
+  flow: ["open-create"],                        // 有 flow 才显示「一键获取密钥」，按顺序跑 actions
+  actions: {
+    "open-create": async (h) => { /* h.byText / h.setInput / h.highlight / h.waitFor / h.docs()，返回给用户看的一句话 */ },
+  },
+}
+```
+
+- `kind`：`text` / `secret` / `multiline`（PEM）/ `file-b64` / `file-text`。字段 `key` 必须等于 apkgo store schema 的 key（`GET https://apkgo.baici.tech/api/v1/stores/schemas`）。
+- `hints` 是自动识别时匹配页面标签文字的正则，`pattern` 过滤识别到的值。
+- `actions` 里拿到的 `h` 会跨同源 iframe 查找；最后的确认按钮请 `h.highlight()` 而不是点它。
+- 改完跑 `npm run e2e`，再在真实后台过一遍。
 
 ## 安全与隐私
 

@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "apkgo 助手",
   "short_name": "apkgo 助手",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "在华为、小米、OPPO、vivo、荣耀、应用宝等开放平台后台里带你找到 API 密钥，一键采集并保存到 apkgo cloud 验证。开源，只连 apkgo。",
   "minimum_chrome_version": "116",
   "icons": {
