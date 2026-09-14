@@ -84,19 +84,23 @@ const handlers = {
   async submit({ store, label, config, appId }) {
     const recipe = APKGO.recipeById(store);
     if (!recipe) return { ok: false, error: "未知商店 " + store };
-    const body = { store_name: store, label: label || `${recipe.cn}账号`, config };
+    const defaultLabel = store === "harmony" ? "HarmonyOS账号" : `${recipe.cn}账号`;
+    const body = { store_name: store, label: label || defaultLabel, config };
     if (appId) body.app_id = appId;
     const r = await apkgoFetch("/openapi/v1/credentials", { method: "POST", body: JSON.stringify(body) });
     if (!r.ok) return r;
     return { ok: true, credential: { id: r.data.id, verified: !!r.data.verified, label: r.data.label } };
   },
 
-  async openConsole({ store }) {
+  async openConsole({ store, url }) {
     const recipe = APKGO.recipeById(store);
-    if (!recipe) return { ok: false, error: "未知商店 " + store };
-    await chrome.storage.session.set({ [APKGO.KEY_PENDING]: store });
-    await chrome.tabs.create({ url: recipe.console });
-    return { ok: true };
+    const targetUrl = (recipe && recipe.console) || url;
+    if (!targetUrl) return { ok: false, error: "未知商店 " + store };
+    if (recipe) {
+      await chrome.storage.session.set({ [APKGO.KEY_PENDING]: recipe.id });
+    }
+    const tab = await chrome.tabs.create({ url: targetUrl });
+    return { ok: true, tabId: tab.id };
   },
 
   // 在后台页面（含同源 iframe）的主世界里挂一个下载钩子：blob / <a download> /

@@ -33,7 +33,20 @@ const APKGO = {
     return APKGO_RECIPES.find((r) => r.hostRe.test(host)) || null;
   },
   recipeById(id) {
-    return APKGO_RECIPES.find((r) => r.id === id) || null;
+    if (!id) return null;
+    const key = String(id).toLowerCase().trim();
+    const alias = {
+      harmony: "huawei",
+      harmonyos: "huawei",
+      hongmeng: "huawei",
+      google: "googleplay",
+      google_play: "googleplay",
+      play: "googleplay",
+      apple: "appstore",
+      ios: "appstore",
+    };
+    const targetId = alias[key] || key;
+    return APKGO_RECIPES.find((r) => r.id === targetId) || null;
   },
   // 把 File 读成 base64（不带 data: 前缀），和网页添加页的 readFileAsBase64 一致。
   fileToBase64(file) {

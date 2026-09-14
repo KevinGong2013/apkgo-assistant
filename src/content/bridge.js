@@ -40,8 +40,8 @@
       if (r.ok) reply({ type: "paired", paired: r.paired });
       else reply({ type: "error", message: r.error });
     } else if (d.type === "open-console") {
-      const r = await send({ type: "openConsole", store: d.store });
-      if (!r.ok) reply({ type: "error", message: r.error });
+      const r = await send({ type: "openConsole", store: d.store, url: d.url });
+      if (!r.ok) reply({ type: "error", message: r.error, action: "open-console" });
       else reply({ type: "open-console-ok", store: d.store });
     }
   });
