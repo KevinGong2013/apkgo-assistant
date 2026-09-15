@@ -668,7 +668,7 @@ const APKGO_RECIPES = [
     steps: [
       { t: "登录腾讯开放平台（应用宝）", d: "" },
       { t: "账号管理 → API发布接口", d: "没开通就先点「申请开通」，审核通过后再回来。", action: "goto" },
-      { t: "读出 access_secret 和开发者 ID", d: "助手从本页读 access_secret，开发者 ID 从后台自己的返回里取。", action: "fetch-key" },
+      { t: "读出 access_secret 和开发者 ID", d: "助手从本页读 access_secret，开发者 ID 从登录信息里取，应用列表从后台自己的返回里取。", action: "fetch-key" },
       { t: "填上要发布的应用的包名和 App ID", d: "应用宝按包名区分 App ID，一个账号可以配多个。" },
     ],
     progressOrder: ["goto", "filling", "saving", "done"],
@@ -714,11 +714,18 @@ const APKGO_RECIPES = [
           throw new Error("没在本页读到 access_secret。请确认停在「账号管理 → API发布接口」页，且接口已开通。");
         }
 
-        // 开发者 ID：从页面自己发过的 JSON 返回里找 userId。
-        let entries = await h.responses();
+        // 开发者 ID：优先读本地存储（应用宝登录后写在 $loginInfo 里，页面一加载就有），
+        // 读不到再退回页面自己发过的 JSON 返回。
+        const digits = (s) => /^\d{4,}$/.test(s);
         let uid = "";
+        for (const item of h.storage()) {
+          if (!item.json) continue;
+          uid = h.deepFind(item.json, ["userId", "user_id", "developerId", "uin"], digits);
+          if (uid) break;
+        }
+        let entries = uid ? [] : await h.responses();
         for (const e of entries) {
-          uid = h.deepFind(e.json, ["userId", "user_id", "developerId", "uin"], (s) => /^\d{4,}$/.test(s));
+          uid = h.deepFind(e.json, ["userId", "user_id", "developerId", "uin"], digits);
           if (uid) break;
         }
         if (!uid && !entries.length) {
@@ -762,7 +769,7 @@ const APKGO_RECIPES = [
           for (const e of list) scan(e.json, 0);
           return out;
         };
-        let apps = pickApps(entries);
+        let apps = pickApps(entries.length ? entries : await h.responses());
         if (!Object.keys(apps).length) {
           // 顶部「安卓应用管理」展开时页面会去拉应用列表；点一下再看。
           const nav = h.byText("a, button, span, div", /^\s*安卓应用管理\s*$/);

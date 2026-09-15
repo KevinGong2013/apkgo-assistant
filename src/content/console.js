@@ -514,6 +514,33 @@
       setTimeout(() => { if (!done) { window.removeEventListener("message", onMsg); resolve([]); } }, timeout);
     });
   }
+  // 读这一页（含同源 iframe）的 localStorage / sessionStorage。有些后台把开发者 ID
+  // 之类直接放在这里（应用宝的 $loginInfo），比等网络返回可靠：页面一加载就有。
+  // 只在配方主动调用时读，配方只取自己声明的字段，其余丢弃。
+  function storage() {
+    const out = [];
+    for (const d of docs()) {
+      const w = d.defaultView;
+      if (!w) continue;
+      for (const [where, store] of [["local", "localStorage"], ["session", "sessionStorage"]]) {
+        let s;
+        try { s = w[store]; if (!s) continue; } catch { continue; }
+        let keys = [];
+        try { keys = Object.keys(s); } catch { continue; }
+        for (const k of keys) {
+          let v;
+          try { v = s.getItem(k); } catch { continue; }
+          if (!v || v.length > 64 * 1024) continue;
+          let json = null;
+          const t = v.trimStart();
+          if (t[0] === "{" || t[0] === "[") { try { json = JSON.parse(v); } catch { /* 不是 JSON */ } }
+          out.push({ where, key: k, text: v, json });
+        }
+      }
+    }
+    return out;
+  }
+
   // 在任意嵌套结构里找第一个叫某个名字、且值像样的字段。
   function deepFind(obj, names, ok) {
     const want = names.map((n) => n.toLowerCase());
@@ -567,7 +594,7 @@
     busyAction = id; result = null; render();
     try {
       await ensureHook();
-      const msg = await fn({ docs, byText, setInput, highlight, wait, waitFor, draft, textOf, responses, deepFind, scanText, reloadAndResume, ...extra });
+      const msg = await fn({ docs, byText, setInput, highlight, wait, waitFor, draft, textOf, responses, storage, deepFind, scanText, reloadAndResume, ...extra });
       result = { kind: "ok", html: esc(msg || "已完成。") };
       busyAction = ""; render();
       if (!autoSave) { // 单独点「帮我点」时也让位；一键流程由 oneClick 统一处理

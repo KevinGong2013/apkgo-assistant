@@ -2,8 +2,8 @@
 
 ## 未发布
 
-- **应用宝**：支持一键获取——从「账号管理 → API发布接口」页读出 access_secret，开发者 ID 和整份应用列表（包名 → App ID）从后台自己的返回里取，无需手填；取不到时才回退到手填一行。
-- 新增页面返回记录器（`world: "MAIN"` content script）：按字段名从后台自己的 JSON 返回里取值，不写死接口地址；配方新增 `h.responses()` / `h.deepFind()` / `h.scanText()` / `h.reloadAndResume()`、字段的 `auto` 标记、`validate(draft)` 钩子，`finalize` 增加第二个参数（完整草稿）。
+- **应用宝**：支持一键获取——从「账号管理 → API发布接口」页读出 access_secret，开发者 ID 从页面登录信息（`$loginInfo`）里取，整份应用列表（包名 → App ID）从后台自己的返回里取，无需手填；取不到时才回退到手填一行。
+- 新增页面返回记录器（`world: "MAIN"` content script）：按字段名从后台自己的 JSON 返回里取值，不写死接口地址；配方新增 `h.storage()` / `h.responses()` / `h.deepFind()` / `h.scanText()` / `h.reloadAndResume()`、字段的 `auto` 标记、`validate(draft)` 钩子，`finalize` 增加第二个参数（完整草稿）。
 - 网页传来的商店名支持别名（`harmony` / `harmonyos` / `hongmeng` → 华为，`google` / `play` → Google Play，`apple` / `ios` → App Store）；「前往后台」没有配方时退回网页给的 URL，并回一条 ack。
 - README：各商店状态、两种一键路子（接口直取 / 代填抓下载）、配方全部可选项。
 
