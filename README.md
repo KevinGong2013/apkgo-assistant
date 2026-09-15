@@ -21,8 +21,18 @@ Chrome / Edge 扩展。打开华为、小米、OPPO、vivo、荣耀、应用宝�
 
 ## 安装
 
-- Chrome 商店 / Edge 商店：上架后在这里补链接。
-- 手动加载：到 [Releases](https://github.com/KevinGong2013/apkgo-assistant/releases/latest) 下载 zip 并解压 → 浏览器打开 `chrome://extensions`（Edge 是 `edge://extensions`）→ 打开「开发者模式」→「加载已解压的扩展程序」→ 选解压出来的文件夹。
+**不发 Chrome / Edge 商店**：国内访问那两个商店都不顺，直接下 zip 手动加载更快，也省掉每次发版等审核。
+
+1. 下载 **https://apkgo.baici.tech/dl/apkgo-assistant.zip**（七牛 CDN，国内直连快）
+   或从 [Releases](https://github.com/KevinGong2013/apkgo-assistant/releases/latest) 下同一个包。
+2. 解压到一个不会被删掉的目录（浏览器每次启动都要读它）。
+3. 打开 `chrome://extensions`（Edge 是 `edge://extensions`）。
+4. 打开右上角「开发者模式」。
+5. 点「加载已解压的扩展程序」，选中刚才解压出来的文件夹。
+
+更新时下载新 zip，覆盖原目录，再回扩展页点一下「重新加载」。
+
+CDN 上的包和 GitHub Release 是同一份字节：镜像流程会先校验 sha256 再上传。想自己核对就 clone 仓库跑 `python3 scripts/build.py`，比对 Release 页的 `.sha256`。
 
 ## 使用
 

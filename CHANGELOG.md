@@ -1,5 +1,9 @@
 # 更新记录
 
+## 未发布
+
+- 改为自建托管：不上 Chrome / Edge 商店，zip 放七牛 CDN，下载地址 https://apkgo.baici.tech/dl/apkgo-assistant.zip ，控制台的安装卡片直接给下载按钮和四步加载说明。
+
 ## 0.5.0 · 2026-09-15
 
 - 助手只在已实登验证过的六家商店（华为、小米、OPPO、vivo、荣耀、应用宝）出现；魅族、Samsung、App Store、Google Play 不再注入，弹窗里也不列，改为引导到 apkgo 添加页手动添加。相应收窄 `host_permissions`，只申请这六家的域名。
