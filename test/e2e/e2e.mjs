@@ -145,6 +145,7 @@ try {
   });
   await ctx.route("https://app.open.qq.com/**", (route) => {
     const u = route.request().url();
+    if (u.includes("/apply_signature/apply_api/request")) return route.fulfill({ contentType: "application/json", body: JSON.stringify({ ret: 0, msg: "", data: { secret: "8f4c5dc2d0474226ac44e5c2af0691c7" } }) });
     if (u.includes("/cgi-bin/")) return route.fulfill({ contentType: "application/json", body: JSON.stringify({ ret: 0, msg: "", data: { userId: "7157850727738201088", name: "上海和住信息科技有限公司", registerStatus: 1 } }) });
     return route.fulfill({ contentType: "text/html; charset=utf-8", body: TENCENT_HTML });
   });
@@ -168,10 +169,29 @@ try {
   // 不手填任何应用信息：助手应当自己点开「安卓应用管理」取到列表
   const beforeT = (await (await fetch(`${ORIGIN}/__received`)).json()).length;
   await inShadow4(`(sr) => sr.querySelector('[data-oneclick]').click()`);
-  await tc.waitForTimeout(4000);
+  await tc.waitForTimeout(2500);
+  step("tencent stage1", { msg: await inShadow4(`(sr) => (sr.querySelector('.msg')||{}).textContent`), navBtn: await inShadow4(`(sr) => { const b = sr.querySelector('[data-nav]'); return b && b.textContent.trim(); }`) });
+  const navBtn = await inShadow4(`(sr) => !!sr.querySelector('[data-nav]')`);
+  if (!navBtn) throw new Error("第一步之后没有出现「去应用列表页」按钮");
+  // 用户点一下跳转
+  await inShadow4(`(sr) => sr.querySelector('[data-nav]').click()`);
+  await tc.waitForLoadState("domcontentloaded");
+  await tc.waitForTimeout(5000);
+  const cdp5 = await ctx.newCDPSession(tc);
+  await cdp5.send("DOM.enable"); await cdp5.send("Runtime.enable");
+  async function inShadow5(fnSrc) {
+    const { root } = await cdp5.send("DOM.getDocument", { depth: 0 });
+    const { nodeId: hostId } = await cdp5.send("DOM.querySelector", { nodeId: root.nodeId, selector: "#apkgo-assistant-root" });
+    const { node } = await cdp5.send("DOM.describeNode", { nodeId: hostId, pierce: true });
+    const { object } = await cdp5.send("DOM.resolveNode", { backendNodeId: node.shadowRoots[0].backendNodeId });
+    const r = await cdp5.send("Runtime.callFunctionOn", { objectId: object.objectId, functionDeclaration: `function(){ return (${fnSrc})(this); }`, returnByValue: true, awaitPromise: true });
+    if (r.exceptionDetails) throw new Error(r.exceptionDetails.text);
+    return r.result.value;
+  }
+  step("tencent stage2", { url: tc.url(), msg: await inShadow5(`(sr) => (sr.querySelector('.msg')||{}).textContent`) });
   const recvT = await (await fetch(`${ORIGIN}/__received`)).json();
   const tcBody = recvT[recvT.length - 1] && recvT[recvT.length - 1].body;
-  step("tencent one-click", { msg: await inShadow4(`(sr) => (sr.querySelector('.msg')||{}).textContent`), newSubmissions: recvT.length - beforeT, store: tcBody && tcBody.store_name, user_id: tcBody && tcBody.config.user_id, secretLen: tcBody && (tcBody.config.access_secret || "").length, app_id_map: tcBody && tcBody.config.app_id_map });
+  step("tencent one-click", { msg: await inShadow5(`(sr) => (sr.querySelector('.msg')||{}).textContent`), newSubmissions: recvT.length - beforeT, store: tcBody && tcBody.store_name, user_id: tcBody && tcBody.config.user_id, secretLen: tcBody && (tcBody.config.access_secret || "").length, app_id_map: tcBody && tcBody.config.app_id_map });
   const tcMap = tcBody && tcBody.config.app_id_map ? JSON.parse(tcBody.config.app_id_map) : {};
   if (!tcBody || tcBody.store_name !== "tencent" || tcBody.config.user_id !== "7157850727738201088") throw new Error("应用宝一键流程没把 user_id / access_secret 保存到服务端");
   if (tcMap["com.yuxiaor"] !== "1105678901" || tcMap["com.yuxiaor.misu"] !== "1105678902") throw new Error("应用宝没有从页面自己的返回里自动合成 app_id_map：" + JSON.stringify(tcMap));

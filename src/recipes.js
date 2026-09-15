@@ -669,11 +669,11 @@ const APKGO_RECIPES = [
       { t: "登录腾讯开放平台（应用宝）", d: "" },
       { t: "账号管理 → API发布接口", d: "没开通就先点「申请开通」，审核通过后再回来。", action: "goto" },
       { t: "读出 access_secret 和开发者 ID", d: "助手从本页读 access_secret，开发者 ID 从登录信息里取，应用列表从后台自己的返回里取。", action: "fetch-key" },
-      { t: "填上要发布的应用的包名和 App ID", d: "应用宝按包名区分 App ID，一个账号可以配多个。" },
+      { t: "去应用列表页采集应用", d: "应用宝按包名区分 App ID；助手在列表页自动取全部，取不到才要你手填一行。", action: "fetch-apps" },
     ],
-    progressOrder: ["goto", "filling", "saving", "done"],
-    progressLabels: { filling: "读取 access_secret 与开发者 ID", saving: "保存到 apkgo 并验证" },
-    wizardHint: "助手会从「API发布接口」页读出 access_secret 和开发者 ID，并自动取应用列表里的包名与 App ID；取不到时再手填一行。",
+    progressOrder: ["goto", "filling", "apps", "saving", "done"],
+    progressLabels: { filling: "读取 access_secret 与开发者 ID", apps: "去应用列表页采集应用", saving: "保存到 apkgo 并验证" },
+    wizardHint: "第一步在本页取 access_secret 和开发者 ID；第二步你点一下跳到应用列表页，助手自动取所有应用的包名与 App ID，然后保存验证。",
     doneBtnText: "重新获取并保存",
     doneHint: "已自动保存并验证应用宝凭据。",
     fields: [
@@ -688,15 +688,40 @@ const APKGO_RECIPES = [
       if (pkg && id) return "";
       return "还差应用信息：助手没能自动取到应用列表，请手动填一行「包名 → App ID」。";
     },
-    flow: ["fetch-key"],
+    flowPages: [/\/p\/app\/list/],
+    flow: ["fetch-key", "fetch-apps"],
     actions: {
       // 不写死接口地址：access_secret 直接从页面上读，开发者 ID 从页面自己发过的
       // JSON 返回里按字段名取（见 src/content/sniff-main.js）。后台改版了也不容易坏。
       "fetch-key": async (h) => {
         const notes = [];
-        // access_secret：先在「access_secret」这个标签附近找，找不到再全页扫一个 32 位十六进制串。
+        // access_secret：首选调后台自己的接口。这一条是同源、只认 cookie、没有时间戳
+        // 签名（和 p.open.qq.com 那组不同），所以扩展可以直接复用你的登录态。
         let secret = "";
-        const label = h.byText("*", /^access_secret$/i);
+        try {
+          const res = await fetch("https://app.open.qq.com/api/xy/runtime/env/prod/manage/datasource/collection/request/open/apply_signature/apply_api/request", {
+            method: "POST",
+            credentials: "include",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Requested-With": "XMLHttpRequest",
+              "xy-env": "prod",
+              "xy-mode": "runtime",
+              "xy-project-id": "open",
+              "xy-page-id": "apply_signature",
+              "xy-page-path": "/developer/team_manage/apply_api",
+            },
+            body: "{}",
+          });
+          if (res.ok) {
+            const j = await res.json();
+            const s = h.deepFind(j, ["secret", "access_secret", "accessSecret"], (x) => /^[A-Za-z0-9]{16,}$/.test(x));
+            if (s) secret = s;
+          }
+        } catch { /* 接口挪了就走下面的页面兜底 */ }
+
+        // 兜底：从页面上读。先在「access_secret」这个标签附近找，再全页扫一个 32 位十六进制串。
+        const label = secret ? null : h.byText("*", /^access_secret$/i);
         if (label) {
           let node = label;
           for (let i = 0; i < 4 && node && !secret; i++, node = node.parentElement) {
@@ -741,10 +766,15 @@ const APKGO_RECIPES = [
         h.draft.config.access_secret = secret;
         if (uid) h.draft.config.user_id = uid;
 
-        // 应用列表（包名 → App ID）：不写死接口，也不自己构造请求——腾讯的
-        // Ual-Access-Signature 由页面 JS 现算且跟时间戳绑定，重放会被拒（-9）。
-        // 所以让页面自己去拉（必要时点一下顶部「安卓应用管理」触发），我们从它的
-        // 返回里按「形状」认：数组里的元素同时有包名样子的串和数字 App ID。
+        return (uid ? "已读到 access_secret 和开发者 ID。" : "已读到 access_secret。") + (notes.length ? notes.join("；") + "。" : "");
+      },
+
+      // 应用列表（包名 → App ID）：腾讯这条接口要页面 JS 现算、跟时间戳绑定的签名
+      // （实测重放返回 -9），所以不由助手构造请求，而是请用户点一下跳到应用列表页，
+      // 让页面自己去拉，我们从它的返回里按「形状」认：数组里的元素同时有包名样子的
+      // 串和数字 App ID。这样腾讯改字段名也不影响。
+      "fetch-apps": async (h) => {
+        if (h.draft.config.__tencent_map) return "应用列表已就绪。";
         const pickApps = (list) => {
           const out = {};
           const scan = (o, depth) => {
@@ -769,20 +799,20 @@ const APKGO_RECIPES = [
           for (const e of list) scan(e.json, 0);
           return out;
         };
-        let apps = pickApps(entries.length ? entries : await h.responses());
-        if (!Object.keys(apps).length) {
-          // 顶部「安卓应用管理」展开时页面会去拉应用列表；点一下再看。
-          const nav = h.byText("a, button, span, div", /^\s*安卓应用管理\s*$/);
-          if (nav) { nav.click(); await h.wait(1800); apps = pickApps(await h.responses()); }
+
+        const onList = /\/p\/app\/list/.test(location.href);
+        if (!onList) {
+          h.requestNav("https://app.open.qq.com/p/app/list", "去应用列表页采集应用 →");
+          return "access_secret 和开发者 ID 已就绪。应用列表要在应用列表页才拉得到，点下面的按钮过去，落地后自动接着采集并保存。";
         }
+        let apps = pickApps(await h.responses());
+        if (!Object.keys(apps).length) { await h.wait(2000); apps = pickApps(await h.responses()); }
         if (Object.keys(apps).length) {
           h.draft.config.__tencent_map = JSON.stringify(apps);
-          notes.push(`自动取到 ${Object.keys(apps).length} 个应用的包名与 App ID`);
-        } else if (!h.draft.config.__tencent_pkg) {
-          notes.push("没自动取到应用列表，请在下面手动填一行「包名 → App ID」");
+          return `取到 ${Object.keys(apps).length} 个应用的包名与 App ID，正在保存并验证…`;
         }
-
-        return (uid ? "已读到 access_secret 和开发者 ID" : "已读到 access_secret") + (notes.length ? "；" + notes.join("；") : "") + "。";
+        if (!h.draft.config.__tencent_pkg) throw new Error("在应用列表页没抓到应用列表。刷新一下这一页再点「一键获取密钥」；或者在下面手填一行「包名 → App ID」。");
+        return "没抓到应用列表，用你手填的那一行。";
       },
     },
     // 应用宝的 app_id 按包名映射；把两个虚拟字段合成 apkgo 要的 app_id_map。

@@ -13,7 +13,7 @@ Chrome / Edge 扩展。打开华为、小米、OPPO、vivo、荣耀、应用宝�
 | OPPO | **一键获取**：直达「生态应用」页，用后台自己的接口读取服务端应用凭据，没有就新建一个 → 提取 Client ID / Secret → 自动保存验证 | ✅ 真实后台跑通 |
 | vivo | **一键获取**：用后台自己的接口读取 Access Key / Secret → 自动保存验证；未开通时跳到开通页并高亮「立即开通」 | ✅ 真实后台跑通 |
 | 荣耀 | **一键获取**：在凭据页用后台接口生成 API 客户端并读出 Client ID / Secret → 自动保存验证 | ✅ 真实后台跑通 |
-| 应用宝 | **一键获取**：在「账号管理 → API发布接口」页读出 access_secret，开发者 ID 从登录信息里取，整份应用列表（包名 → App ID）从后台自己的返回里取 → 自动保存验证 | 🟡 已实现，待真实后台确认 |
+| 应用宝 | **一键获取（两段）**：① 在「API发布接口」页调后台接口取 access_secret、从登录信息取开发者 ID；② 你点一下跳到应用列表页，助手取全部应用的包名与 App ID → 自动保存验证 | 🟡 已实现，待真实后台确认 |
 | 魅族 | 引导 + 采集：client_id / client_secret | ⚠️ 未实登核对 |
 | Samsung | 引导 + 采集：Service Account ID / 私钥 PEM / Content ID | ⚠️ 未实登核对 |
 | App Store | 引导 + 采集：Issuer ID / Key ID / .p8 | ⚠️ 未实登核对 |
@@ -38,7 +38,7 @@ Chrome / Edge 扩展。打开华为、小米、OPPO、vivo、荣耀、应用宝�
 
 两种路子，取决于那家后台给了什么。
 
-**接口直取 / 读页面**（小米、OPPO、vivo、荣耀、应用宝）：这些后台的网页本身就是靠一组内部接口在读写密钥（比如 OPPO 的 `/myapi/server/app-list`、vivo 的 `/webapi/access/detail`、荣耀的 `/portal/auth/genAuthenticate`）。扩展在你已登录的页面里，以你的会话直接调这些接口读出（没有则创建）凭据，跳过一切点点点，几秒钟就保存验证完。请求只发往那家后台自己的域名。应用宝稍有不同：`access_secret` 直接显示在「API发布接口」页上，直接读；开发者 ID 在页面自己的登录信息里（`localStorage` 的 `$loginInfo`），页面一加载就有；应用列表只在后台自己的接口返回里，而腾讯那几个接口要一个由页面 JS 现算、跟时间戳绑定的签名（`Ual-Access-Signature`，重放会被拒），所以不由助手构造请求，而是让页面照常发，助手从**它自己的返回**里取值——既不用写死接口地址，也不用碰签名（见下一节）。
+**接口直取 / 读页面**（小米、OPPO、vivo、荣耀、应用宝）：这些后台的网页本身就是靠一组内部接口在读写密钥（比如 OPPO 的 `/myapi/server/app-list`、vivo 的 `/webapi/access/detail`、荣耀的 `/portal/auth/genAuthenticate`）。扩展在你已登录的页面里，以你的会话直接调这些接口读出（没有则创建）凭据，跳过一切点点点，几秒钟就保存验证完。请求只发往那家后台自己的域名。应用宝同时用到了这两种：`access_secret` 走它自己的同源接口（只认 cookie，没有签名，登录了就能取）；开发者 ID 在页面的登录信息里（`localStorage` 的 `$loginInfo`）；应用列表则只有 `p.open.qq.com` 那条接口有，而它要一个由页面 JS 现算、跟时间戳绑定的签名（`Ual-Access-Signature`，实测重放返回 `-9`），助手不去伪造签名，而是**请你点一下跳到应用列表页**，让页面自己拉，再从它的返回里取——所以应用宝是两段式，中间需要你点一下。
 
 **页面代填 + 抓下载**（华为）：AGC 的密钥是一次性下载的 JSON，没有可读的接口，于是：
 
@@ -102,6 +102,7 @@ Chrome / Edge 扩展。打开华为、小米、OPPO、vivo、荣耀、应用宝�
 - `kind`：`text` / `secret` / `multiline`（PEM）/ `file-b64` / `file-text`。字段 `key` 必须等于 apkgo store schema 的 key（`GET https://apkgo.baici.tech/api/v1/stores/schemas`）。
 - `hints` 是自动识别时匹配页面标签文字的正则，`pattern` 过滤识别到的值。
 - `actions` 里拿到的 `h` 会跨同源 iframe 查找；需要用户亲手确认的按钮请 `h.highlight()` 而不是点它。
+- 需要换一页才能继续时用 `h.requestNav(url, 按钮文案)`：助手不自己跳走，而是在面板上给一个按钮，用户点了才跳，落地后自动接着跑。配方用 `flowPages: [/正则/]` 声明这些页面也算在流程内。
 - `finalize(config, draft)`：第二个参数是完整草稿，`actions` 算出来的中间值（不是声明字段）从这里取。`validate(draft)` 返回非空字符串就拦下保存。
 - 网页传来的商店名带别名：`harmony` / `harmonyos` → 华为，`google` / `play` → Google Play，`apple` / `ios` → App Store。
 - 改完跑 `npm run e2e`，再在真实后台过一遍。

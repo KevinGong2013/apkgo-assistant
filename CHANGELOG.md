@@ -2,7 +2,8 @@
 
 ## 未发布
 
-- **应用宝**：支持一键获取——从「账号管理 → API发布接口」页读出 access_secret，开发者 ID 从页面登录信息（`$loginInfo`）里取，整份应用列表（包名 → App ID）从后台自己的返回里取，无需手填；取不到时才回退到手填一行。
+- **应用宝**：支持一键获取，两段式——① 在「API发布接口」页调后台同源接口取 access_secret（只认 cookie，无签名），从页面登录信息 `$loginInfo` 取开发者 ID；② 你点一下跳到应用列表页，助手从页面自己的返回里按形状取全部应用的包名与 App ID，然后保存验证。取不到才回退到手填一行。
+- 流程支持跨页续跑：`h.requestNav(url, 文案)` 让助手在面板上给一个按钮而不是自己跳走，用户点了才跳，落地后自动接着采集；配方用 `flowPages` 声明流程内的其他页面。
 - 新增页面返回记录器（`world: "MAIN"` content script）：按字段名从后台自己的 JSON 返回里取值，不写死接口地址；配方新增 `h.storage()` / `h.responses()` / `h.deepFind()` / `h.scanText()` / `h.reloadAndResume()`、字段的 `auto` 标记、`validate(draft)` 钩子，`finalize` 增加第二个参数（完整草稿）。
 - 网页传来的商店名支持别名（`harmony` / `harmonyos` / `hongmeng` → 华为，`google` / `play` → Google Play，`apple` / `ios` → App Store）；「前往后台」没有配方时退回网页给的 URL，并回一条 ack。
 - README：各商店状态、两种一键路子（接口直取 / 代填抓下载）、配方全部可选项。

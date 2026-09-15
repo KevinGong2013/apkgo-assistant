@@ -25,6 +25,8 @@
   let busyAction = "";
   // 一键流程的进度：idle → goto → filling → confirm（等用户点弹窗确认）→ captured → saving → done | error
   let stage = "idle";
+  // 配方要求跳到另一页继续采集时放这里；由用户点按钮触发，助手不自己跳走。
+  let pendingNav = null;
   let manualOpen = false; // 「手动模式」折叠是否展开；自动流程失败时自动展开
 
   // ---- shadow host ----
@@ -124,6 +126,7 @@
         <button class="btn acc" data-oneclick="1" ${running || !paired ? "disabled" : ""}>${running ? "进行中…" : stage === "done" ? doneText : "一键获取密钥"}</button>
         ${stage === "idle" ? `<div class="hint">${esc(wizardHint)}</div>` : stage === "done" && recipe.doneHint ? `<div class="hint">${esc(recipe.doneHint)}</div>` : ""}
         ${progressHtml()}
+        ${pendingNav ? `<button class="btn acc" data-nav="1" style="margin-top:10px">${esc(pendingNav.label)}</button><div class="hint">会打开 ${esc(pendingNav.url.replace(/^https?:\/\//, ""))}，落地后自动接着采集。</div>` : ""}
       </div>`;
       const manual = recipe.noManual ? "" : `<details class="manual" ${manualOpen ? "open" : ""}><summary>手动模式：自己按步骤操作、选文件</summary>${preHtml}${stepsHtml}${formHtml}</details>`;
       bodyHtml = connHtml + '<div style="height:12px"></div>' + wizard + manual;
@@ -184,7 +187,7 @@
 
   // ---- events (delegated) ----
   panel.addEventListener("click", async (e) => {
-    const t = e.target.closest("[data-act],[data-pick],[data-eye],[data-unfile],[data-action],[data-oneclick]");
+    const t = e.target.closest("[data-act],[data-pick],[data-eye],[data-unfile],[data-action],[data-oneclick],[data-nav]");
     if (!t) return;
     if (t.dataset.act === "close") return togglePanel(false);
     if (t.dataset.act === "auto") return autoDetect();
@@ -192,6 +195,12 @@
     if (t.dataset.act === "save") return submit();
     if (t.dataset.action) return runAction(t.dataset.action);
     if (t.dataset.oneclick) return oneClick();
+    if (t.dataset.nav && pendingNav) {
+      const { url } = pendingNav;
+      chrome.storage.session.set({ [APKGO.KEY_PENDING]: recipe.id, ["autorun:" + recipe.id]: true }).catch(() => {});
+      location.href = url;
+      return;
+    }
     if (t.dataset.pick) return startPick(t.dataset.pick);
     if (t.dataset.eye) { const inp = panel.querySelector(`input[data-k="${t.dataset.eye}"]`); if (inp) { inp.type = inp.type === "password" ? "text" : "password"; t.textContent = inp.type === "password" ? "显示" : "隐藏"; } return; }
     if (t.dataset.unfile) { delete draft.config[t.dataset.unfile]; delete draft.files[t.dataset.unfile]; await saveDraft(); return render(); }
@@ -483,6 +492,7 @@
     return null;
   }
   function onConsolePage() {
+    if ((recipe.flowPages || []).some((re) => re.test(location.href))) return true;
     try {
       const target = new URL(recipe.console);
       const cur = new URL(location.href);
@@ -584,6 +594,8 @@
     return true;
   }
 
+  function requestNav(url, label) { pendingNav = { url, label }; render(); }
+
   async function runAction(id, extra = {}) {
     if (id === "goto") {
       if (!onConsolePage()) { location.href = recipe.console; return false; }
@@ -594,7 +606,7 @@
     busyAction = id; result = null; render();
     try {
       await ensureHook();
-      const msg = await fn({ docs, byText, setInput, highlight, wait, waitFor, draft, textOf, responses, storage, deepFind, scanText, reloadAndResume, ...extra });
+      const msg = await fn({ docs, byText, setInput, highlight, wait, waitFor, draft, textOf, responses, storage, deepFind, scanText, reloadAndResume, requestNav, onConsolePage, ...extra });
       result = { kind: "ok", html: esc(msg || "已完成。") };
       busyAction = ""; render();
       if (!autoSave) { // 单独点「帮我点」时也让位；一键流程由 oneClick 统一处理
@@ -659,9 +671,16 @@
       return;
     }
     autoSave = true;
+    pendingNav = null;
     setStage("filling");
     for (const id of flow) {
       if (!(await runAction(id, { isReset }))) { autoSave = false; if (!recipe.noManual) manualOpen = true; setStage("error"); return; }
+      if (pendingNav) { // 这一步要求换一页继续，等用户点按钮，不自己跳走
+        autoSave = false;
+        setStage(pendingNav.stage || "filling");
+        render();
+        return;
+      }
     }
     const missing = recipe.fields.filter((f) => f.required && !draft.config[f.key]);
     if (!missing.length && !recipe.fields.some((f) => f.capture)) {
