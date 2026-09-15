@@ -114,7 +114,7 @@
     if (hasFlow) {
       // 一键模式：包含需要手动填写的必填字段（如需）+ 备注名 + 一键按钮 + 进度
       const running = stage !== "idle" && stage !== "done" && stage !== "error";
-      const extraFields = recipe.hideWizardFields ? [] : recipe.fields.filter((f) => !f.kind.startsWith("file") && f.required && !f.capture && f.key !== "private_key");
+      const extraFields = recipe.hideWizardFields ? [] : recipe.fields.filter((f) => !f.kind.startsWith("file") && f.required && !f.capture && !f.auto && f.key !== "private_key");
       const extraFieldsHtml = extraFields.map((f) => fieldHtml(f)).join("");
       const doneText = recipe.doneBtnText || "再获取一个";
       const wizardHint = recipe.wizardHint || `扩展会跳到密钥页、打开创建弹窗并填好；唯一留给你的是弹窗上的「确认」。之后下载、保存、验证自动完成。`;
@@ -496,6 +496,67 @@
       return location.href.split("#")[0] === recipe.console.split("#")[0];
     }
   }
+  // 向 MAIN world 的记录器要这一页发过的 JSON 返回（见 src/content/sniff-main.js）。
+  // 只在配方主动调用时发生；拿到后配方只取自己声明的字段，其余丢弃。
+  let sniffSeq = 0;
+  function responses(timeout = 1200) {
+    return new Promise((resolve) => {
+      const id = ++sniffSeq;
+      let done = false;
+      const onMsg = (e) => {
+        const d = e.data;
+        if (e.source !== window || !d || d.source !== "apkgo-assistant-sniff" || d.type !== "sniff-res" || d.id !== id) return;
+        done = true; window.removeEventListener("message", onMsg);
+        resolve((d.entries || []).map((x) => { try { return { url: x.url, json: JSON.parse(x.text) }; } catch { return null; } }).filter(Boolean));
+      };
+      window.addEventListener("message", onMsg);
+      window.postMessage({ source: "apkgo-assistant", type: "sniff-req", id }, location.origin);
+      setTimeout(() => { if (!done) { window.removeEventListener("message", onMsg); resolve([]); } }, timeout);
+    });
+  }
+  // 在任意嵌套结构里找第一个叫某个名字、且值像样的字段。
+  function deepFind(obj, names, ok) {
+    const want = names.map((n) => n.toLowerCase());
+    const seen = new Set();
+    const walk = (o, depth) => {
+      if (!o || typeof o !== "object" || depth > 8 || seen.has(o)) return null;
+      seen.add(o);
+      for (const [k, v] of Object.entries(o)) {
+        if (want.includes(k.toLowerCase()) && (typeof v === "string" || typeof v === "number")) {
+          const s = String(v).trim();
+          if (s && (!ok || ok(s))) return s;
+        }
+      }
+      for (const v of Object.values(o)) { const r = walk(v, depth + 1); if (r) return r; }
+      return null;
+    };
+    return walk(obj, 0);
+  }
+  // 整页找一个符合模式的独立字符串（用于页面上直接显示的密钥）。
+  function scanText(re) {
+    for (const d of docs()) {
+      for (const inp of d.querySelectorAll("input, textarea")) {
+        const v = (inp.value || inp.getAttribute("value") || inp.placeholder || "").trim();
+        const m = v.match(re); if (m) return m[0];
+      }
+      const m = (d.body && d.body.innerText || "").match(re);
+      if (m) return m[0];
+    }
+    return "";
+  }
+  // 一键流程里需要重新加载页面（比如要让记录器赶在页面自己的请求之前就位）时用它。
+  async function reloadAndResume(reason) {
+    const guard = "sniffReload:" + recipe.id;
+    let already = false;
+    try { ({ [guard]: already } = await chrome.storage.session.get(guard)); } catch { /* ignore */ }
+    if (already) return false;
+    try { await chrome.storage.session.set({ [guard]: true, ["autorun:" + recipe.id]: true, [APKGO.KEY_PENDING]: recipe.id }); } catch { /* ignore */ }
+    result = { kind: "ok", html: esc(reason || "正在刷新页面重试…") };
+    render();
+    location.reload();
+    return true;
+  }
+
   async function runAction(id, extra = {}) {
     if (id === "goto") {
       if (!onConsolePage()) { location.href = recipe.console; return false; }
@@ -506,7 +567,7 @@
     busyAction = id; result = null; render();
     try {
       await ensureHook();
-      const msg = await fn({ docs, byText, setInput, highlight, wait, waitFor, draft, textOf, ...extra });
+      const msg = await fn({ docs, byText, setInput, highlight, wait, waitFor, draft, textOf, responses, deepFind, scanText, reloadAndResume, ...extra });
       result = { kind: "ok", html: esc(msg || "已完成。") };
       busyAction = ""; render();
       if (!autoSave) { // 单独点「帮我点」时也让位；一键流程由 oneClick 统一处理

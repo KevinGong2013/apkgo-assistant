@@ -2,6 +2,8 @@
 
 ## 未发布
 
+- **应用宝**：支持一键获取——从「账号管理 → API发布接口」页读出 access_secret，开发者 ID 从后台自己的返回里取；包名和 App ID 仍需手填一行。
+- 新增页面返回记录器（`world: "MAIN"` content script）：按字段名从后台自己的 JSON 返回里取值，不写死接口地址；配方新增 `h.responses()` / `h.deepFind()` / `h.scanText()` / `h.reloadAndResume()` 和字段的 `auto` 标记。
 - 网页传来的商店名支持别名（`harmony` / `harmonyos` / `hongmeng` → 华为，`google` / `play` → Google Play，`apple` / `ios` → App Store）；「前往后台」没有配方时退回网页给的 URL，并回一条 ack。
 - README：各商店状态、两种一键路子（接口直取 / 代填抓下载）、配方全部可选项。
 

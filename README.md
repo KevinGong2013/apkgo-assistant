@@ -13,13 +13,13 @@ Chrome / Edge 扩展。打开华为、小米、OPPO、vivo、荣耀、应用宝�
 | OPPO | **一键获取**：直达「生态应用」页，用后台自己的接口读取服务端应用凭据，没有就新建一个 → 提取 Client ID / Secret → 自动保存验证 | ✅ 真实后台跑通 |
 | vivo | **一键获取**：用后台自己的接口读取 Access Key / Secret → 自动保存验证；未开通时跳到开通页并高亮「立即开通」 | ✅ 真实后台跑通 |
 | 荣耀 | **一键获取**：在凭据页用后台接口生成 API 客户端并读出 Client ID / Secret → 自动保存验证 | ✅ 真实后台跑通 |
-| 应用宝 | 引导 + 采集：user_id / access_secret / app_id | ⚠️ 步骤按文档写，未实登核对 |
+| 应用宝 | **一键获取**：在「账号管理 → API发布接口」页读出 access_secret，开发者 ID 从后台自己的返回里取 → 自动保存验证；包名和 App ID 需你填一行 | 🟡 已实现，待真实后台确认 |
 | 魅族 | 引导 + 采集：client_id / client_secret | ⚠️ 未实登核对 |
 | Samsung | 引导 + 采集：Service Account ID / 私钥 PEM / Content ID | ⚠️ 未实登核对 |
 | App Store | 引导 + 采集：Issuer ID / Key ID / .p8 | ⚠️ 未实登核对 |
 | Google Play | 仅引导，请在 apkgo 添加页上传 JSON | — |
 
-一键获取的五家（华为、小米、OPPO、vivo、荣耀）都在真实后台跑通过。一键获取前会先检查登录状态，没登录会明确提示。「未实登核对」的商店，面板里的菜单名和入口 URL 来自官方文档与社区教程，改版了对不上就改 [`src/recipes.js`](src/recipes.js)，一家商店就是一个对象；补上 `flow` 和 `actions` 就能变成一键。
+一键获取的五家（华为、小米、OPPO、vivo、荣耀）都在真实后台跑通过，应用宝待确认。一键获取前会先检查登录状态，没登录会明确提示。「未实登核对」的商店，面板里的菜单名和入口 URL 来自官方文档与社区教程，改版了对不上就改 [`src/recipes.js`](src/recipes.js)，一家商店就是一个对象；补上 `flow` 和 `actions` 就能变成一键。
 
 ## 安装
 
@@ -38,7 +38,7 @@ Chrome / Edge 扩展。打开华为、小米、OPPO、vivo、荣耀、应用宝�
 
 两种路子，取决于那家后台给了什么。
 
-**接口直取**（小米、OPPO、vivo、荣耀）：这些后台的网页本身就是靠一组内部接口在读写密钥（比如 OPPO 的 `/myapi/server/app-list`、vivo 的 `/webapi/access/detail`、荣耀的 `/portal/auth/genAuthenticate`）。扩展在你已登录的页面里，以你的会话直接调这些接口读出（没有则创建）凭据，跳过一切点点点，几秒钟就保存验证完。请求只发往那家后台自己的域名。
+**接口直取 / 读页面**（小米、OPPO、vivo、荣耀、应用宝）：这些后台的网页本身就是靠一组内部接口在读写密钥（比如 OPPO 的 `/myapi/server/app-list`、vivo 的 `/webapi/access/detail`、荣耀的 `/portal/auth/genAuthenticate`）。扩展在你已登录的页面里，以你的会话直接调这些接口读出（没有则创建）凭据，跳过一切点点点，几秒钟就保存验证完。请求只发往那家后台自己的域名。应用宝稍有不同：`access_secret` 直接显示在「API发布接口」页上，直接读；开发者 ID 只在后台自己的接口返回里，于是由页面照常请求，助手从**它自己的返回**里按字段名取——不写死接口地址，改版了也不容易坏（见下一节）。
 
 **页面代填 + 抓下载**（华为）：AGC 的密钥是一次性下载的 JSON，没有可读的接口，于是：
 
@@ -49,6 +49,18 @@ Chrome / Edge 扩展。打开华为、小米、OPPO、vivo、荣耀、应用宝�
 5. **自动保存验证**：调 apkgo 新建凭证，服务端连华为验证一次，结果显示在面板进度里。
 
 失败时面板底部的「手动模式」会自动展开（接口直取的商店没有手动模式）：完整步骤、每步单独的「帮我点」、自动识别、点选、选文件都在里面。
+
+## 页面返回记录器
+
+有些后台把需要的值只放在自己接口的返回里，页面上看不到（应用宝的开发者 ID 就是）。与其把接口地址写死进配方，不如让页面照常请求，助手从它自己的返回里取。
+
+[`src/content/sniff-main.js`](src/content/sniff-main.js) 在页面自己的世界里运行（MV3 的 `world: "MAIN"`，`document_start`），把页面发出的 JSON 返回记在一个环形缓冲里：
+
+- 只在装了配方的商店后台域名上运行，上限 40 条、每条 64KB，页面一关就没了。
+- 不主动外发。只有配方在你点「一键获取密钥」后来要，才回一份；配方只取自己声明的字段（应用宝取 `userId`），其余当场丢弃。
+- 只读，不改写页面的任何请求或返回。
+
+配方里用 `h.responses()` 拿到 `[{url, json}]`，配 `h.deepFind(json, ["userId"], 校验函数)` 按字段名深挖。记录器要赶在页面自己的请求之前就位，刚装好扩展时缓冲是空的，`h.reloadAndResume()` 会刷新一次页面并自动接着跑。
 
 ## 写一份配方
 
@@ -67,9 +79,12 @@ Chrome / Edge 扩展。打开华为、小米、OPPO、vivo、荣耀、应用宝�
   ],
   flow: ["fetch-key"],                          // 有 flow 才显示「一键获取密钥」，按顺序跑 actions
   actions: {
-    "fetch-key": async (h) => { /* 用 fetch 调后台接口，或 h.byText / h.setInput / h.highlight / h.waitFor 操作页面；返回给用户看的一句话 */ },
+    "fetch-key": async (h) => { /* 用 fetch 调后台接口；或 h.byText / h.setInput / h.highlight / h.waitFor 操作页面；
+                                 或 h.responses() + h.deepFind() 从页面自己的 JSON 返回里取值、h.scanText(正则) 全页扫一个值；
+                                 h.reloadAndResume() 刷新重试。返回给用户看的一句话 */ },
   },
   // 可选：
+  fields: [{ key: "user_id", auto: true }],           // auto：由 actions 自动填，向导里不占位
   preload: async (h) => ({ email: "…" }),       // 面板打开时预填字段（比如从接口读到的账号邮箱）
   detect: async (h) => ({ client_id: "…" }),    // 「自动识别」时优先跑它，再跑 hints 的通用识别
   noManual: true,                               // 不显示「手动模式」（接口直取的商店用）

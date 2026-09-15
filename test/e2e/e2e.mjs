@@ -132,6 +132,42 @@ try {
   step("huawei saved", { msg: await inShadow2(`(sr) => (sr.querySelector('.msg')||{}).textContent`), store: last && last.body.store_name, jsonKeys: decoded && Object.keys(decoded), name: decoded && decoded.name, roles: decoded && decoded.roles });
   if (!decoded || decoded.name !== "apkgo" || !decoded.roles.includes("app")) throw new Error("华为一键流程没有自动把下载的 JSON 保存到服务端");
 
+  // 7c. 应用宝：从页面读 access_secret + 从页面自己的 JSON 返回里取 userId
+  const TENCENT_HTML = fs.readFileSync(path.join(HERE, "fixtures/tencent.html"), "utf8");
+  await ctx.route("https://app.open.qq.com/**", (route) => {
+    const u = route.request().url();
+    if (u.includes("/cgi-bin/")) return route.fulfill({ contentType: "application/json", body: JSON.stringify({ ret: 0, msg: "", data: { userId: "7157850727738201088", name: "上海和住信息科技有限公司", registerStatus: 1 } }) });
+    return route.fulfill({ contentType: "text/html; charset=utf-8", body: TENCENT_HTML });
+  });
+  const tc = await ctx.newPage();
+  await tc.goto("https://app.open.qq.com/p/developer/team_manage/apply_api");
+  await tc.waitForSelector("#apkgo-assistant-root", { state: "attached", timeout: 10000 });
+  await tc.waitForTimeout(1200);
+  const cdp4 = await ctx.newCDPSession(tc);
+  await cdp4.send("DOM.enable"); await cdp4.send("Runtime.enable");
+  async function inShadow4(fnSrc) {
+    const { root } = await cdp4.send("DOM.getDocument", { depth: 0 });
+    const { nodeId: hostId } = await cdp4.send("DOM.querySelector", { nodeId: root.nodeId, selector: "#apkgo-assistant-root" });
+    const { node } = await cdp4.send("DOM.describeNode", { nodeId: hostId, pierce: true });
+    const { object } = await cdp4.send("DOM.resolveNode", { backendNodeId: node.shadowRoots[0].backendNodeId });
+    const r = await cdp4.send("Runtime.callFunctionOn", { objectId: object.objectId, functionDeclaration: `function(){ return (${fnSrc})(this); }`, returnByValue: true, awaitPromise: true });
+    if (r.exceptionDetails) throw new Error(r.exceptionDetails.text + " " + JSON.stringify(r.exceptionDetails.exception));
+    return r.result.value;
+  }
+  await inShadow4(`(sr) => { if (!sr.querySelector('.panel').classList.contains('open')) sr.querySelector('.launch').click(); }`);
+  await tc.waitForTimeout(500);
+  // 包名 / App ID 要用户填
+  await inShadow4(`(sr) => { for (const [k, v] of [['__tencent_pkg','com.yuxiaor'],['__tencent_appid','1234567']]) { const i = sr.querySelector('input[data-k='+k+']'); i.value = v; i.dispatchEvent(new Event('input', { bubbles: true })); } }`);
+  await tc.waitForTimeout(200);
+  const beforeT = (await (await fetch(`${ORIGIN}/__received`)).json()).length;
+  await inShadow4(`(sr) => sr.querySelector('[data-oneclick]').click()`);
+  await tc.waitForTimeout(3000);
+  const recvT = await (await fetch(`${ORIGIN}/__received`)).json();
+  const tcBody = recvT[recvT.length - 1] && recvT[recvT.length - 1].body;
+  step("tencent one-click", { msg: await inShadow4(`(sr) => (sr.querySelector('.msg')||{}).textContent`), newSubmissions: recvT.length - beforeT, store: tcBody && tcBody.store_name, user_id: tcBody && tcBody.config.user_id, secretLen: tcBody && (tcBody.config.access_secret || "").length, app_id_map: tcBody && tcBody.config.app_id_map });
+  if (!tcBody || tcBody.store_name !== "tencent" || tcBody.config.user_id !== "7157850727738201088" || !tcBody.config.app_id_map) throw new Error("应用宝一键流程没把 user_id / access_secret / app_id_map 保存到服务端");
+  await tc.screenshot({ path: path.join(HERE, "../../dist/shots/08-tencent.png") });
+
   // 8. 弹窗页能打开、显示已连接
   const popup = await ctx.newPage();
   await popup.goto(`chrome-extension://${new URL(sw.url()).host}/src/popup/popup.html`);

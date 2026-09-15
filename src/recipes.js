@@ -662,21 +662,75 @@ const APKGO_RECIPES = [
   {
     id: "tencent", cn: "应用宝", product: "腾讯开放平台",
     hostRe: /(^|\.)open\.qq\.com$/,
-    console: "https://open.qq.com/",
-    prereq: ["API 发布接口需要「申请开通」并等审核", "每个应用还要一个 app_id，在应用详情页能看到"],
+    // 「账号管理 → API发布接口」那一页：access_secret 就显示在这里（2026-09 截图核对）。
+    console: "https://app.open.qq.com/p/developer/team_manage/apply_api",
+    prereq: ["API 发布接口要先「申请开通」并等审核，通过后这一页才会显示 access_secret", "每个要发布的应用还需要一个 App ID，在应用详情页能看到"],
     steps: [
       { t: "登录腾讯开放平台（应用宝）", d: "" },
-      { t: "账户管理 → API 发布接口 → 申请开通", d: "审核通过后才有 access_secret。" },
-      { t: "记下 user_id（开发者 ID）和 access_secret", d: "" },
-      { t: "在应用详情页记下要发布的应用的 app_id，一起填到本面板", d: "" },
+      { t: "账号管理 → API发布接口", d: "没开通就先点「申请开通」，审核通过后再回来。", action: "goto" },
+      { t: "读出 access_secret 和开发者 ID", d: "助手从本页读 access_secret，开发者 ID 从后台自己的返回里取。", action: "fetch-key" },
+      { t: "填上要发布的应用的包名和 App ID", d: "应用宝按包名区分 App ID，一个账号可以配多个。" },
     ],
+    progressOrder: ["goto", "filling", "saving", "done"],
+    progressLabels: { filling: "读取 access_secret 与开发者 ID", saving: "保存到 apkgo 并验证" },
+    wizardHint: "助手会从「API发布接口」页读出 access_secret，并从后台返回里取开发者 ID；包名和 App ID 需要你填一行。",
+    doneBtnText: "重新获取并保存",
+    doneHint: "已自动保存并验证应用宝凭据。",
     fields: [
-      { key: "user_id", label: "User ID（开发者 ID）", kind: "text", hints: [/user[\s_-]*id/i, /开发者\s*ID|用户\s*ID/i], pattern: /^\d{4,}$/, required: true },
-      { key: "access_secret", label: "Access Secret", kind: "secret", hints: [/access[\s_-]*secret/i, /secret|密钥/i], pattern: /^[A-Za-z0-9]{16,}$/, required: true },
+      { key: "user_id", label: "User ID（开发者 ID）", kind: "text", hints: [/user[\s_-]*id/i, /开发者\s*ID|用户\s*ID/i], pattern: /^\d{4,}$/, required: true, auto: true },
+      { key: "access_secret", label: "Access Secret", kind: "secret", hints: [/access[\s_-]*secret/i, /secret|密钥/i], pattern: /^[A-Za-z0-9]{16,}$/, required: true, auto: true },
       { key: "__tencent_pkg", label: "应用包名", kind: "text", placeholder: "com.example.app", required: true, virtual: true },
       { key: "__tencent_appid", label: "该应用的 App ID", kind: "text", hints: [/app\s*id|应用\s*ID/i], pattern: /^\d{4,}$/, required: true, virtual: true },
     ],
-    // 应用宝的 app_id 按包名映射；这里把两个虚拟字段合成 apkgo 要的 app_id_map。
+    flow: ["fetch-key"],
+    actions: {
+      // 不写死接口地址：access_secret 直接从页面上读，开发者 ID 从页面自己发过的
+      // JSON 返回里按字段名取（见 src/content/sniff-main.js）。后台改版了也不容易坏。
+      "fetch-key": async (h) => {
+        const notes = [];
+        // access_secret：先在「access_secret」这个标签附近找，找不到再全页扫一个 32 位十六进制串。
+        let secret = "";
+        const label = h.byText("*", /^access_secret$/i);
+        if (label) {
+          let node = label;
+          for (let i = 0; i < 4 && node && !secret; i++, node = node.parentElement) {
+            for (const el of [...(node.parentElement ? node.parentElement.querySelectorAll("input, textarea") : [])]) {
+              const v = (el.value || el.getAttribute("value") || el.placeholder || "").trim();
+              if (/^[A-Za-z0-9]{16,}$/.test(v)) { secret = v; break; }
+            }
+          }
+        }
+        if (!secret) secret = h.scanText(/\b[0-9a-f]{32}\b/);
+        if (!secret) secret = h.scanText(/\b[A-Za-z0-9]{24,64}\b/);
+        if (!secret) {
+          const apply = h.byText("button, a, span", /^\s*申请开通\s*$/);
+          if (apply) { h.highlight(apply); throw new Error("这一页还没有 access_secret，多半是 API 发布接口还没开通。已高亮「申请开通」，审核通过后再回来点一次。"); }
+          throw new Error("没在本页读到 access_secret。请确认停在「账号管理 → API发布接口」页，且接口已开通。");
+        }
+
+        // 开发者 ID：从页面自己发过的 JSON 返回里找 userId。
+        let entries = await h.responses();
+        let uid = "";
+        for (const e of entries) {
+          uid = h.deepFind(e.json, ["userId", "user_id", "developerId", "uin"], (s) => /^\d{4,}$/.test(s));
+          if (uid) break;
+        }
+        if (!uid && !entries.length) {
+          // 记录器要赶在页面自己的请求之前就位；刚装上/刚重载扩展时会是空的，刷新一次即可。
+          if (await h.reloadAndResume("正在刷新页面，让助手赶在后台请求之前就位…")) return "正在刷新…";
+        }
+        if (!uid) {
+          const keys = new Set();
+          for (const e of entries) { const walk = (o, d) => { if (!o || typeof o !== "object" || d > 3) return; for (const [k, v] of Object.entries(o)) { keys.add(k); walk(v, d + 1); } }; walk(e.json, 0); }
+          notes.push("没从后台返回里取到开发者 ID，请在下面手动填" + (keys.size ? "（看到的字段：" + [...keys].slice(0, 25).join("、") + "）" : "（这一页没抓到后台返回）"));
+        }
+
+        h.draft.config.access_secret = secret;
+        if (uid) h.draft.config.user_id = uid;
+        return notes.length ? "已读到 access_secret；" + notes.join("；") + "。" : "已读到 access_secret 和开发者 ID，接着填包名和 App ID 就能保存。";
+      },
+    },
+    // 应用宝的 app_id 按包名映射；把两个虚拟字段合成 apkgo 要的 app_id_map。
     finalize(config) {
       const pkg = (config.__tencent_pkg || "").trim();
       const id = (config.__tencent_appid || "").trim();
