@@ -148,18 +148,17 @@ python3 scripts/build.py   # 打 zip 到 dist/
 
 不用手动装扩展：`npm install && npx playwright install chromium && npm run e2e`。脚本用真 Chromium 加载真正的扩展，起一个伪 apkgo 服务（配对页 + 两个 Open API 端点），把 `open.oppomobile.com` 和 `developer.huawei.com` 拦截成伪造的后台页（`test/e2e/fixtures/`），然后走完：配对 → OPPO 一键获取（接口直取）→ 华为一键获取（代填弹窗、模拟用户点确认、抓下载、自动保存）→ 弹窗。截图落在 `dist/shots/`，商店截图就是这么来的。
 
-## 发布到商店
+## 发布新版本
 
-首发要在两家后台手动做一次（注册开发者、建条目、填商店列表和隐私表单、传截图），材料都在 [`store/listing.md`](store/listing.md)。之后每个版本全自动：打 tag → Release 出 zip → [`publish.yml`](.github/workflows/publish.yml) 把同一个 zip 传到 Chrome Web Store 和 Edge Add-ons 并提交审核。
+1. 改完代码跑 `npm run e2e`，确认全绿。
+2. 版本号：`manifest.json` 和 `package.json` 一起改，补 `CHANGELOG.md`。
+3. 打 tag 推上去：`git tag -a vX.Y.Z -m "…" && git push origin vX.Y.Z`。
+   [`release.yml`](.github/workflows/release.yml) 会打出可复现的 zip 和 sha256，挂到 Release 页。
+4. 去 apkgo-cloud 的 Actions 手动跑一次 **assistant-mirror**（不填 tag = 取最新 Release）。
+   它会校验 sha256 再传七牛，并刷新 CDN——固定路径不刷新的话用户会一直拿到旧包。
+5. 访问 https://apkgo.baici.tech/dl/apkgo-assistant.zip 确认下到的是新版本。
 
-一次性配置（在本机跑，拿到的值填进仓库 Secrets）：
-
-```bash
-# Chrome：Google Cloud 控制台建一个 OAuth「桌面应用」客户端，然后
-npx publish-browser-extension@3 init     # 引导你完成授权，输出 CHROME_REFRESH_TOKEN 等
-# Edge：Partner Center → 发布 API → 生成 API key，得到 EDGE_PRODUCT_ID / EDGE_CLIENT_ID / EDGE_API_KEY
-gh secret set CHROME_EXTENSION_ID   # 依次把 7 个值设进去
-```
+七牛密钥只存在于私有的 apkgo-cloud 仓库，本仓库（公开）不持有任何生产凭证。
 
 ## 许可证
 
