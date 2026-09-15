@@ -65,15 +65,47 @@ apkgo 助手是 apkgo cloud 的配套扩展。apkgo cloud 帮你把安装包一�
 
 ## 提交流程
 
-**Chrome Web Store**（https://chrome.google.com/webstore/devconsole）
-1. 首次要用 Google 账号注册开发者并付一次性 5 美元。
-2. 「新增项目」→ 上传 zip → 填上面的名称、简介、描述、类别、图标、截图。
-3. 「隐私权规范」标签页：单一用途、权限用途、数据使用声明，按上面填；隐私政策 URL 填 PRIVACY.md 链接。
-4. 提交审核，通常 1 到 3 个工作日。
+首次上架必须在两家后台手动做一次（注册开发者、建条目、填商店列表与隐私表单、传截图）。上架后每个版本走 [`publish.yml`](../.github/workflows/publish.yml) 自动发。
 
-**Edge Add-ons**（https://partner.microsoft.com/dashboard/microsoftedge）
+### Chrome Web Store
+
+后台：https://chrome.google.com/webstore/devconsole
+
+1. Google 账号注册开发者，一次性 5 美元。
+2. 「新增项目」→ 上传 `apkgo-assistant-<版本>.zip`（Release 页下载，别自己重新打包）。
+3. **商店发布信息**：名称、简介、详细描述、类别「开发者工具」、语言「中文（简体）」，图标 128×128，截图 5 张，小宣传图 440×280（可选）。
+4. **隐私权规范**（审核最容易卡的一页，逐项对应本文上面的段落）：
+   - 单一用途说明
+   - 每个权限的用途：`storage`、`scripting`、`downloads`、六家商店后台域名、apkgo 域名、可选站点权限
+   - 远程代码：**否**（扩展不加载任何远程脚本）
+   - 数据用途：勾「身份验证信息」，用途只勾「实现扩展的单一用途」；不出售、不用于无关用途、不用于信用评估
+   - 隐私政策 URL：https://github.com/KevinGong2013/apkgo-assistant/blob/main/PRIVACY.md
+5. 提交审核，通常 1–3 个工作日。
+
+### Edge Add-ons
+
+后台：https://partner.microsoft.com/dashboard/microsoftedge
+
 1. 微软账号注册 Partner Center，免费。
-2. 「创建新扩展」→ 上传同一个 zip → 属性里选类别、填隐私政策 URL 和支持链接 → 商店列表里填名称、描述、截图。
-3. 提交认证，通常 1 到 7 个工作日。
+2. 「创建新扩展」→ 上传**同一个 zip**。
+3. 「可用性」选公开与目标市场；「属性」填类别、隐私政策 URL、支持链接（仓库地址）。
+4. 「商店列表」填名称、简介、描述、截图。
+5. 提交认证，通常 1–7 个工作日。
 
-两家审核通过后，把商店链接填到 apkgo-cloud 的 `web/src/lib/assistant.ts` 里 `ASSISTANT_CHROME_STORE_URL` / `ASSISTANT_EDGE_STORE_URL`，添加页就会显示对应入口。
+### 上架之后
+
+1. 把两个商店链接填进 apkgo-cloud 的 `web/src/lib/assistant.ts`（`ASSISTANT_CHROME_STORE_URL` / `ASSISTANT_EDGE_STORE_URL`），添加商店账号页就会显示对应入口。
+2. 配好 7 个仓库 Secret，之后打 tag 即自动发新版本：
+
+   ```bash
+   npx publish-browser-extension@3 init   # Chrome：拿 refresh token
+   gh secret set CHROME_EXTENSION_ID      # 依次设置 7 个值
+   ```
+
+   Chrome 需要 `CHROME_EXTENSION_ID`、`CHROME_CLIENT_ID`、`CHROME_CLIENT_SECRET`、`CHROME_REFRESH_TOKEN`；
+   Edge 需要 `EDGE_PRODUCT_ID`、`EDGE_CLIENT_ID`、`EDGE_API_KEY`（Partner Center → 发布 API）。
+
+### 审核可能被问到的两件事
+
+- **为什么需要读取商店后台页面？** 扩展的唯一功能就是在这些页面上帮用户取回他自己的 API 密钥；host 权限只申请了这六家后台加 apkgo 自己的域名，没有 `<all_urls>`。
+- **为什么会读取页面的接口返回和本地存储？** 部分后台（应用宝）把开发者 ID 只放在自己的接口返回和 `localStorage` 里。助手仅在用户点「一键获取密钥」后读取，且只取声明好的字段，其余立即丢弃，不外发、不落盘。详见隐私说明。
