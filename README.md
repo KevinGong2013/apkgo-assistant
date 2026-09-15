@@ -12,14 +12,14 @@ Chrome / Edge 扩展。打开华为、小米、OPPO、vivo、荣耀、应用宝�
 | 小米 | **一键获取**：后台接口读出开发者邮箱，页面提取私钥（没有就自动生成）→ 自动保存验证；完成后可「重置私钥并重新保存」 | ✅ 真实后台跑通 |
 | OPPO | **一键获取**：直达「生态应用」页，用后台自己的接口读取服务端应用凭据，没有就新建一个 → 提取 Client ID / Secret → 自动保存验证 | ✅ 真实后台跑通 |
 | vivo | **一键获取**：用后台自己的接口读取 Access Key / Secret → 自动保存验证；未开通时跳到开通页并高亮「立即开通」 | ✅ 真实后台跑通 |
-| 荣耀 | **一键获取**：在凭据页用后台接口生成 API 客户端并读出 Client ID / Secret → 自动保存验证 | 🟡 已实现，待真实后台确认 |
+| 荣耀 | **一键获取**：在凭据页用后台接口生成 API 客户端并读出 Client ID / Secret → 自动保存验证 | ✅ 真实后台跑通 |
 | 应用宝 | 引导 + 采集：user_id / access_secret / app_id | ⚠️ 步骤按文档写，未实登核对 |
 | 魅族 | 引导 + 采集：client_id / client_secret | ⚠️ 未实登核对 |
 | Samsung | 引导 + 采集：Service Account ID / 私钥 PEM / Content ID | ⚠️ 未实登核对 |
 | App Store | 引导 + 采集：Issuer ID / Key ID / .p8 | ⚠️ 未实登核对 |
 | Google Play | 仅引导，请在 apkgo 添加页上传 JSON | — |
 
-一键获取前会先检查登录状态，没登录会明确提示。「未实登核对」的商店，面板里的菜单名和入口 URL 来自官方文档与社区教程，改版了对不上就改 [`src/recipes.js`](src/recipes.js)，一家商店就是一个对象；补上 `flow` 和 `actions` 就能变成一键。
+一键获取的五家（华为、小米、OPPO、vivo、荣耀）都在真实后台跑通过。一键获取前会先检查登录状态，没登录会明确提示。「未实登核对」的商店，面板里的菜单名和入口 URL 来自官方文档与社区教程，改版了对不上就改 [`src/recipes.js`](src/recipes.js)，一家商店就是一个对象；补上 `flow` 和 `actions` 就能变成一键。
 
 ## 安装
 
