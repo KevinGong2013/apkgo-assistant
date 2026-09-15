@@ -13,7 +13,7 @@ Chrome / Edge 扩展。打开华为、小米、OPPO、vivo、荣耀、应用宝�
 | OPPO | **一键获取**：直达「生态应用」页，用后台自己的接口读取服务端应用凭据，没有就新建一个 → 提取 Client ID / Secret → 自动保存验证 | ✅ 真实后台跑通 |
 | vivo | **一键获取**：用后台自己的接口读取 Access Key / Secret → 自动保存验证；未开通时跳到开通页并高亮「立即开通」 | ✅ 真实后台跑通 |
 | 荣耀 | **一键获取**：在凭据页用后台接口生成 API 客户端并读出 Client ID / Secret → 自动保存验证 | ✅ 真实后台跑通 |
-| 应用宝 | **一键获取**：在「账号管理 → API发布接口」页读出 access_secret，开发者 ID 从后台自己的返回里取 → 自动保存验证；包名和 App ID 需你填一行 | 🟡 已实现，待真实后台确认 |
+| 应用宝 | **一键获取**：在「账号管理 → API发布接口」页读出 access_secret，开发者 ID 和整份应用列表（包名 → App ID）都从后台自己的返回里取 → 自动保存验证 | 🟡 已实现，待真实后台确认 |
 | 魅族 | 引导 + 采集：client_id / client_secret | ⚠️ 未实登核对 |
 | Samsung | 引导 + 采集：Service Account ID / 私钥 PEM / Content ID | ⚠️ 未实登核对 |
 | App Store | 引导 + 采集：Issuer ID / Key ID / .p8 | ⚠️ 未实登核对 |
@@ -38,7 +38,7 @@ Chrome / Edge 扩展。打开华为、小米、OPPO、vivo、荣耀、应用宝�
 
 两种路子，取决于那家后台给了什么。
 
-**接口直取 / 读页面**（小米、OPPO、vivo、荣耀、应用宝）：这些后台的网页本身就是靠一组内部接口在读写密钥（比如 OPPO 的 `/myapi/server/app-list`、vivo 的 `/webapi/access/detail`、荣耀的 `/portal/auth/genAuthenticate`）。扩展在你已登录的页面里，以你的会话直接调这些接口读出（没有则创建）凭据，跳过一切点点点，几秒钟就保存验证完。请求只发往那家后台自己的域名。应用宝稍有不同：`access_secret` 直接显示在「API发布接口」页上，直接读；开发者 ID 只在后台自己的接口返回里，于是由页面照常请求，助手从**它自己的返回**里按字段名取——不写死接口地址，改版了也不容易坏（见下一节）。
+**接口直取 / 读页面**（小米、OPPO、vivo、荣耀、应用宝）：这些后台的网页本身就是靠一组内部接口在读写密钥（比如 OPPO 的 `/myapi/server/app-list`、vivo 的 `/webapi/access/detail`、荣耀的 `/portal/auth/genAuthenticate`）。扩展在你已登录的页面里，以你的会话直接调这些接口读出（没有则创建）凭据，跳过一切点点点，几秒钟就保存验证完。请求只发往那家后台自己的域名。应用宝稍有不同：`access_secret` 直接显示在「API发布接口」页上，直接读；开发者 ID 和应用列表只在后台自己的接口返回里，而腾讯那几个接口要一个由页面 JS 现算、跟时间戳绑定的签名（`Ual-Access-Signature`，重放会被拒），所以不由助手构造请求，而是让页面照常发，助手从**它自己的返回**里取值——既不用写死接口地址，也不用碰签名（见下一节）。
 
 **页面代填 + 抓下载**（华为）：AGC 的密钥是一次性下载的 JSON，没有可读的接口，于是：
 
@@ -60,7 +60,7 @@ Chrome / Edge 扩展。打开华为、小米、OPPO、vivo、荣耀、应用宝�
 - 不主动外发。只有配方在你点「一键获取密钥」后来要，才回一份；配方只取自己声明的字段（应用宝取 `userId`），其余当场丢弃。
 - 只读，不改写页面的任何请求或返回。
 
-配方里用 `h.responses()` 拿到 `[{url, json}]`，配 `h.deepFind(json, ["userId"], 校验函数)` 按字段名深挖。记录器要赶在页面自己的请求之前就位，刚装好扩展时缓冲是空的，`h.reloadAndResume()` 会刷新一次页面并自动接着跑。
+配方里用 `h.responses()` 拿到 `[{url, json}]`，配 `h.deepFind(json, ["userId"], 校验函数)` 按字段名深挖；也可以按「形状」认，比如应用宝的应用列表就是「数组里的元素同时有包名样子的串和数字 App ID」，这样字段叫什么都不影响。记录器要赶在页面自己的请求之前就位，刚装好扩展时缓冲是空的，`h.reloadAndResume()` 会刷新一次页面并自动接着跑。
 
 ## 写一份配方
 
@@ -98,6 +98,7 @@ Chrome / Edge 扩展。打开华为、小米、OPPO、vivo、荣耀、应用宝�
 - `kind`：`text` / `secret` / `multiline`（PEM）/ `file-b64` / `file-text`。字段 `key` 必须等于 apkgo store schema 的 key（`GET https://apkgo.baici.tech/api/v1/stores/schemas`）。
 - `hints` 是自动识别时匹配页面标签文字的正则，`pattern` 过滤识别到的值。
 - `actions` 里拿到的 `h` 会跨同源 iframe 查找；需要用户亲手确认的按钮请 `h.highlight()` 而不是点它。
+- `finalize(config, draft)`：第二个参数是完整草稿，`actions` 算出来的中间值（不是声明字段）从这里取。`validate(draft)` 返回非空字符串就拦下保存。
 - 网页传来的商店名带别名：`harmony` / `harmonyos` → 华为，`google` / `play` → Google Play，`apple` / `ios` → App Store。
 - 改完跑 `npm run e2e`，再在真实后台过一遍。
 

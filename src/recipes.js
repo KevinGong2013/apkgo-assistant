@@ -673,15 +673,21 @@ const APKGO_RECIPES = [
     ],
     progressOrder: ["goto", "filling", "saving", "done"],
     progressLabels: { filling: "读取 access_secret 与开发者 ID", saving: "保存到 apkgo 并验证" },
-    wizardHint: "助手会从「API发布接口」页读出 access_secret，并从后台返回里取开发者 ID；包名和 App ID 需要你填一行。",
+    wizardHint: "助手会从「API发布接口」页读出 access_secret 和开发者 ID，并自动取应用列表里的包名与 App ID；取不到时再手填一行。",
     doneBtnText: "重新获取并保存",
     doneHint: "已自动保存并验证应用宝凭据。",
     fields: [
       { key: "user_id", label: "User ID（开发者 ID）", kind: "text", hints: [/user[\s_-]*id/i, /开发者\s*ID|用户\s*ID/i], pattern: /^\d{4,}$/, required: true, auto: true },
       { key: "access_secret", label: "Access Secret", kind: "secret", hints: [/access[\s_-]*secret/i, /secret|密钥/i], pattern: /^[A-Za-z0-9]{16,}$/, required: true, auto: true },
-      { key: "__tencent_pkg", label: "应用包名", kind: "text", placeholder: "com.example.app", required: true, virtual: true },
-      { key: "__tencent_appid", label: "该应用的 App ID", kind: "text", hints: [/app\s*id|应用\s*ID/i], pattern: /^\d{4,}$/, required: true, virtual: true },
+      { key: "__tencent_pkg", label: "应用包名（自动取到应用列表时可留空）", kind: "text", placeholder: "com.example.app", virtual: true },
+      { key: "__tencent_appid", label: "该应用的 App ID（同上）", kind: "text", hints: [/app\s*id|应用\s*ID/i], pattern: /^\d{4,}$/, virtual: true },
     ],
+    validate(cfg) {
+      if (cfg.__tencent_map) return "";
+      const pkg = (cfg.__tencent_pkg || "").trim(), id = (cfg.__tencent_appid || "").trim();
+      if (pkg && id) return "";
+      return "还差应用信息：助手没能自动取到应用列表，请手动填一行「包名 → App ID」。";
+    },
     flow: ["fetch-key"],
     actions: {
       // 不写死接口地址：access_secret 直接从页面上读，开发者 ID 从页面自己发过的
@@ -727,15 +733,61 @@ const APKGO_RECIPES = [
 
         h.draft.config.access_secret = secret;
         if (uid) h.draft.config.user_id = uid;
-        return notes.length ? "已读到 access_secret；" + notes.join("；") + "。" : "已读到 access_secret 和开发者 ID，接着填包名和 App ID 就能保存。";
+
+        // 应用列表（包名 → App ID）：不写死接口，也不自己构造请求——腾讯的
+        // Ual-Access-Signature 由页面 JS 现算且跟时间戳绑定，重放会被拒（-9）。
+        // 所以让页面自己去拉（必要时点一下顶部「安卓应用管理」触发），我们从它的
+        // 返回里按「形状」认：数组里的元素同时有包名样子的串和数字 App ID。
+        const pickApps = (list) => {
+          const out = {};
+          const scan = (o, depth) => {
+            if (!o || typeof o !== "object" || depth > 6) return;
+            if (Array.isArray(o)) {
+              for (const it of o) {
+                if (it && typeof it === "object") {
+                  let pkg = "", id = "";
+                  for (const [k, v] of Object.entries(it)) {
+                    const s = String(v == null ? "" : v);
+                    if (!pkg && /pkg|package|bundle/i.test(k) && /^[a-zA-Z][\w]*(\.[\w]+){1,}$/.test(s)) pkg = s;
+                    if (!id && /app_?id/i.test(k) && /^\d{4,}$/.test(s)) id = s;
+                  }
+                  if (pkg && id) out[pkg] = id;
+                }
+                scan(it, depth + 1);
+              }
+              return;
+            }
+            for (const v of Object.values(o)) scan(v, depth + 1);
+          };
+          for (const e of list) scan(e.json, 0);
+          return out;
+        };
+        let apps = pickApps(entries);
+        if (!Object.keys(apps).length) {
+          // 顶部「安卓应用管理」展开时页面会去拉应用列表；点一下再看。
+          const nav = h.byText("a, button, span, div", /^\s*安卓应用管理\s*$/);
+          if (nav) { nav.click(); await h.wait(1800); apps = pickApps(await h.responses()); }
+        }
+        if (Object.keys(apps).length) {
+          h.draft.config.__tencent_map = JSON.stringify(apps);
+          notes.push(`自动取到 ${Object.keys(apps).length} 个应用的包名与 App ID`);
+        } else if (!h.draft.config.__tencent_pkg) {
+          notes.push("没自动取到应用列表，请在下面手动填一行「包名 → App ID」");
+        }
+
+        return (uid ? "已读到 access_secret 和开发者 ID" : "已读到 access_secret") + (notes.length ? "；" + notes.join("；") : "") + "。";
       },
     },
     // 应用宝的 app_id 按包名映射；把两个虚拟字段合成 apkgo 要的 app_id_map。
-    finalize(config) {
+    finalize(config, draft) {
+      const out = { user_id: config.user_id, access_secret: config.access_secret };
+      let map = {};
+      const raw = (draft && draft.__tencent_map) || config.__tencent_map;
+      if (raw) { try { map = JSON.parse(raw); } catch { map = {}; } }
       const pkg = (config.__tencent_pkg || "").trim();
       const id = (config.__tencent_appid || "").trim();
-      const out = { user_id: config.user_id, access_secret: config.access_secret };
-      if (pkg && id) out.app_id_map = JSON.stringify({ [pkg]: id });
+      if (pkg && id) map[pkg] = id;               // 手填的那行优先生效
+      if (Object.keys(map).length) out.app_id_map = JSON.stringify(map);
       return out;
     },
   },

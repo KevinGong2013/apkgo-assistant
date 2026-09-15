@@ -1,6 +1,6 @@
 <!doctype html><html lang="zh"><head><meta charset="utf-8"><title>API接口申请 - 腾讯应用开放平台</title>
 <style>body{font:14px/1.7 -apple-system,"PingFang SC",sans-serif;margin:0;color:#222}.top{height:56px;border-bottom:1px solid #eee;display:flex;align-items:center;padding:0 24px;font-weight:700}.wrap{display:flex}.side{width:220px;padding:20px 0;min-height:80vh}.side div{padding:9px 28px;color:#555}.side .on{color:#0052d9;background:#f2f6ff}.main{flex:1;padding:28px 40px}h2{margin:0 0 6px;font-size:20px}.row{display:flex;gap:24px;margin:22px 0}.lab{width:110px;color:#666;text-align:right}.box{border:1px solid #dcdcdc;border-radius:4px;padding:10px 14px;width:380px;background:#fafafa;color:#888;font-family:Menlo,monospace}</style></head>
-<body><div class="top">腾讯应用开放平台 · 安卓应用管理</div><div class="wrap">
+<body><div class="top">腾讯应用开放平台 &nbsp; <span id="nav" style="font-weight:400;cursor:pointer">安卓应用管理</span></div><div class="wrap">
 <div class="side"><div>账号资料</div><div>团队管理</div><div class="on">API发布接口</div></div>
 <div class="main"><h2>API接口申请</h2><p style="color:#888">接口适用于提交新应用、更新应用版本和修改应用信息</p>
 <div class="row"><div class="lab">access_secret</div><div class="box" id="sec">8f4c5dc2d0474226ac44e5c2af0691c7</div></div>
@@ -8,4 +8,8 @@
 <script>
 // 模拟页面自己在加载时拉一次账号信息（userId 只在这个返回里）
 fetch("/cgi-bin/developer/request?cmd=get_info").then(r => r.json()).then(() => {});
+// 应用列表要点一下顶部「安卓应用管理」才拉（和真实后台一样，签名由页面现算）
+document.getElementById("nav").onclick = () => {
+  fetch("https://p.open.qq.com/v3/get_app_list", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ page: 1 }) }).then(r => r.json()).then(() => {});
+};
 </script></body></html>

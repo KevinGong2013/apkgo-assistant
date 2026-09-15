@@ -134,6 +134,15 @@ try {
 
   // 7c. 应用宝：从页面读 access_secret + 从页面自己的 JSON 返回里取 userId
   const TENCENT_HTML = fs.readFileSync(path.join(HERE, "fixtures/tencent.html"), "utf8");
+  // 真实腾讯会回跨域头，桩也要回，否则页面的 fetch 被 CORS 拒、记录器看不到返回
+  const CORS = { "access-control-allow-origin": "https://app.open.qq.com", "access-control-allow-credentials": "true", "access-control-allow-headers": "*", "access-control-allow-methods": "POST,GET,OPTIONS" };
+  await ctx.route("https://p.open.qq.com/**", (route) => {
+    if (route.request().method() === "OPTIONS") return route.fulfill({ status: 204, headers: CORS });
+    return route.fulfill({ contentType: "application/json", headers: CORS, body: JSON.stringify({ ret: 0, data: { total: 2, list: [
+      { appId: "1105678901", pkgName: "com.yuxiaor", appName: "寓小二房东版" },
+      { appId: "1105678902", pkgName: "com.yuxiaor.misu", appName: "米宿管家" },
+    ] } }) });
+  });
   await ctx.route("https://app.open.qq.com/**", (route) => {
     const u = route.request().url();
     if (u.includes("/cgi-bin/")) return route.fulfill({ contentType: "application/json", body: JSON.stringify({ ret: 0, msg: "", data: { userId: "7157850727738201088", name: "上海和住信息科技有限公司", registerStatus: 1 } }) });
@@ -156,16 +165,16 @@ try {
   }
   await inShadow4(`(sr) => { if (!sr.querySelector('.panel').classList.contains('open')) sr.querySelector('.launch').click(); }`);
   await tc.waitForTimeout(500);
-  // 包名 / App ID 要用户填
-  await inShadow4(`(sr) => { for (const [k, v] of [['__tencent_pkg','com.yuxiaor'],['__tencent_appid','1234567']]) { const i = sr.querySelector('input[data-k='+k+']'); i.value = v; i.dispatchEvent(new Event('input', { bubbles: true })); } }`);
-  await tc.waitForTimeout(200);
+  // 不手填任何应用信息：助手应当自己点开「安卓应用管理」取到列表
   const beforeT = (await (await fetch(`${ORIGIN}/__received`)).json()).length;
   await inShadow4(`(sr) => sr.querySelector('[data-oneclick]').click()`);
-  await tc.waitForTimeout(3000);
+  await tc.waitForTimeout(4000);
   const recvT = await (await fetch(`${ORIGIN}/__received`)).json();
   const tcBody = recvT[recvT.length - 1] && recvT[recvT.length - 1].body;
   step("tencent one-click", { msg: await inShadow4(`(sr) => (sr.querySelector('.msg')||{}).textContent`), newSubmissions: recvT.length - beforeT, store: tcBody && tcBody.store_name, user_id: tcBody && tcBody.config.user_id, secretLen: tcBody && (tcBody.config.access_secret || "").length, app_id_map: tcBody && tcBody.config.app_id_map });
-  if (!tcBody || tcBody.store_name !== "tencent" || tcBody.config.user_id !== "7157850727738201088" || !tcBody.config.app_id_map) throw new Error("应用宝一键流程没把 user_id / access_secret / app_id_map 保存到服务端");
+  const tcMap = tcBody && tcBody.config.app_id_map ? JSON.parse(tcBody.config.app_id_map) : {};
+  if (!tcBody || tcBody.store_name !== "tencent" || tcBody.config.user_id !== "7157850727738201088") throw new Error("应用宝一键流程没把 user_id / access_secret 保存到服务端");
+  if (tcMap["com.yuxiaor"] !== "1105678901" || tcMap["com.yuxiaor.misu"] !== "1105678902") throw new Error("应用宝没有从页面自己的返回里自动合成 app_id_map：" + JSON.stringify(tcMap));
   await tc.screenshot({ path: path.join(HERE, "../../dist/shots/08-tencent.png") });
 
   // 8. 弹窗页能打开、显示已连接

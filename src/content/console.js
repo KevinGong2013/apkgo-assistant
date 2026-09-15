@@ -698,10 +698,16 @@
     if (busy) return;
     const missing = recipe.fields.filter((f) => f.required && !draft.config[f.key]);
     if (missing.length) { result = { kind: "warn", html: "还差：" + missing.map((f) => esc(f.label)).join("、") }; return render(); }
+    if (typeof recipe.validate === "function") {
+      const bad = recipe.validate(draft.config);
+      if (bad) { result = { kind: "warn", html: esc(bad) }; return render(); }
+    }
     busy = true; result = null; render();
     let config = {};
     for (const f of recipe.fields) if (draft.config[f.key]) config[f.key] = draft.config[f.key];
-    if (recipe.finalize) config = recipe.finalize(config);
+    // finalize 还能看到完整草稿：actions 自动算出来的中间值（如应用宝的包名→App ID
+    // 映射）不是声明字段，不会进 config，得从这里取。
+    if (recipe.finalize) config = recipe.finalize(config, draft.config);
     const r = await APKGO.send({ type: "submit", store: recipe.id, label: draft.label.trim(), config, appId: draft.appId });
     busy = false;
     if (r.ok) {
