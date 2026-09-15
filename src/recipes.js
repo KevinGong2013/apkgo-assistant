@@ -11,9 +11,13 @@
 // hints 是自动识别时匹配页面上标签文字的正则；pattern 用来过滤识别到的值。
 // 各家后台会改版，菜单名和入口 URL 以实际为准——错了请提 PR，改这个文件就行。
 
+// verified: true = 已在真实后台完整跑通，才会在页面上出助手入口。
+// 其余几家（魅族 / Samsung / App Store / Google Play）步骤是照文档写的、没实登核对过，
+// 所以既不在 manifest 的 matches 里（不注入），也不在弹窗里出现；先留着，等哪天
+// 实登验证过，给它加上 verified: true 并把域名加回 manifest 即可。
 const APKGO_RECIPES = [
   {
-    id: "huawei", cn: "华为", product: "AppGallery Connect",
+    id: "huawei", verified: true, cn: "华为", product: "AppGallery Connect",
     hostRe: /(^|\.)developer\.huawei\.com$/,
     // 「用户与访问 → API密钥 → Connect API」那一页（2026-09 实登核对）。
     console: "https://developer.huawei.com/consumer/cn/service/josp/agc/index.html#/ups/9249519184595983326",
@@ -105,7 +109,7 @@ const APKGO_RECIPES = [
     },
   },
   {
-    id: "xiaomi", cn: "小米", product: "小米开放平台",
+    id: "xiaomi", verified: true, cn: "小米", product: "小米开放平台",
     hostRe: /(^|\.)dev\.(mi|xiaomi)\.com$/,
     // 2026-09 实登核对：管理中心 → 应用服务 → 自动发布接口
     console: "https://dev.mi.com/xiaomihyperos/console/app-services/auto-publish-api",
@@ -262,7 +266,7 @@ const APKGO_RECIPES = [
     },
   },
   {
-    id: "oppo", cn: "OPPO", product: "OPPO 开放平台",
+    id: "oppo", verified: true, cn: "OPPO", product: "OPPO 开放平台",
     hostRe: /(^|\.)open\.oppomobile\.com$/,
     console: "https://open.oppomobile.com/new/ecological/app",
     noManual: true,
@@ -408,7 +412,7 @@ const APKGO_RECIPES = [
     },
   },
   {
-    id: "vivo", cn: "vivo", product: "vivo 开放平台",
+    id: "vivo", verified: true, cn: "vivo", product: "vivo 开放平台",
     hostRe: /(^|\.)dev\.vivo\.com\.cn$/,
     console: "https://dev.vivo.com.cn/apiAccess/detail",
     noManual: true,
@@ -550,7 +554,7 @@ const APKGO_RECIPES = [
     },
   },
   {
-    id: "honor", cn: "荣耀", product: "荣耀开发者服务平台",
+    id: "honor", verified: true, cn: "荣耀", product: "荣耀开发者服务平台",
     hostRe: /(^|\.)developer\.(honor|hihonor)\.com$/,
     console: "https://developer.honor.com/cn/manageCenter/certificate?cardRouteCode=E00069&~id=69",
     noManual: true,
@@ -660,7 +664,7 @@ const APKGO_RECIPES = [
     },
   },
   {
-    id: "tencent", cn: "应用宝", product: "腾讯开放平台",
+    id: "tencent", verified: true, cn: "应用宝", product: "腾讯开放平台",
     hostRe: /(^|\.)open\.qq\.com$/,
     // 「账号管理 → API发布接口」那一页：access_secret 就显示在这里（2026-09 截图核对）。
     console: "https://app.open.qq.com/p/developer/team_manage/apply_api",

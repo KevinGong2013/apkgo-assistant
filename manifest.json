@@ -37,10 +37,6 @@
     "https://developer.hihonor.com/*",
     "https://open.qq.com/*",
     "https://*.open.qq.com/*",
-    "https://open.flyme.cn/*",
-    "https://seller.samsungapps.com/*",
-    "https://appstoreconnect.apple.com/*",
-    "https://play.google.com/*",
     "https://apkgo.baici.tech/*",
     "http://localhost/*"
   ],
@@ -59,11 +55,7 @@
         "https://developer.honor.com/*",
         "https://developer.hihonor.com/*",
         "https://open.qq.com/*",
-        "https://*.open.qq.com/*",
-        "https://open.flyme.cn/*",
-        "https://seller.samsungapps.com/*",
-        "https://appstoreconnect.apple.com/*",
-        "https://play.google.com/*"
+        "https://*.open.qq.com/*"
       ],
       "js": [
         "src/content/sniff-main.js"
@@ -82,11 +74,7 @@
         "https://developer.honor.com/*",
         "https://developer.hihonor.com/*",
         "https://open.qq.com/*",
-        "https://*.open.qq.com/*",
-        "https://open.flyme.cn/*",
-        "https://seller.samsungapps.com/*",
-        "https://appstoreconnect.apple.com/*",
-        "https://play.google.com/*"
+        "https://*.open.qq.com/*"
       ],
       "js": [
         "src/recipes.js",

@@ -22,3 +22,5 @@ body { width: 320px; margin: 0; background: #0F1613; color: #E6EDE9; font: 13px/
 .foot a { color: #18E299; text-decoration: none; }
 .foot span { margin-left: auto; }
 .err { color: #FCA5A5; font-size: 12px; margin-top: 6px; }
+.note { width: 100%; margin-top: 8px; font-size: 11px; color: #8FA39A; line-height: 1.5; }
+.note a { color: #18E299; text-decoration: none; }

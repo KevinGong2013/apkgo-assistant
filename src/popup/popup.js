@@ -36,7 +36,9 @@
   }
 
   function renderStores() {
-    stores.innerHTML = APKGO_RECIPES.map((r) => `<button class="chip" data-id="${r.id}">${esc(r.cn)}</button>`).join("");
+    const list = APKGO_RECIPES.filter((r) => r.verified);
+    stores.innerHTML = list.map((r) => `<button class="chip" data-id="${r.id}">${esc(r.cn)}</button>`).join("")
+      + `<div class="note">其余商店（魅族、Samsung、App Store、Google Play）暂未适配，请在 <a href="${APKGO.DEFAULT_ORIGIN}/credentials/new" target="_blank" rel="noopener">apkgo 添加页</a>手动添加。</div>`;
     stores.onclick = async (e) => {
       const b = e.target.closest("[data-id]");
       if (!b) return;

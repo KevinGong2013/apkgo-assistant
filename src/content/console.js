@@ -7,7 +7,7 @@
 (() => {
   if (window.top !== window) return;
   const recipe = APKGO.recipeForUrl(location.href);
-  if (!recipe) return;
+  if (!recipe || !recipe.verified) return; // 只在验证过的商店后台露面
   if (document.getElementById("apkgo-assistant-root")) return;
 
   // viewBox 收紧到正好框住三根横条（x18–82、y26–83），水平垂直居中，去掉原 100×100 画布顶部的空白。
