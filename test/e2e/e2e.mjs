@@ -197,6 +197,81 @@ try {
   if (tcMap["com.yuxiaor"] !== "1105678901" || tcMap["com.yuxiaor.misu"] !== "1105678902") throw new Error("应用宝没有从页面自己的返回里自动合成 app_id_map：" + JSON.stringify(tcMap));
   await tc.screenshot({ path: path.join(HERE, "../../dist/shots/08-tencent.png") });
 
+  // 7d. 小米：私钥只从「获取私钥」那一块读（页面上更靠前的长串不算）；读到就不碰「重置私钥」；
+  //     「重置私钥并重新保存」读到新私钥才存，读不到就报错，绝不存回刚作废的旧私钥；
+  //     页面上没有私钥时不替用户重置。
+  const XIAOMI_HTML = fs.readFileSync(path.join(HERE, "fixtures/xiaomi.html"), "utf8");
+  await ctx.route("https://dev.mi.com/**", (route) => {
+    if (route.request().url().includes("/pltapi/uiue/user")) return route.fulfill({ contentType: "application/json", body: JSON.stringify({ code: 0, data: { email: "dev@example.com" } }) });
+    return route.fulfill({ contentType: "text/html; charset=utf-8", body: XIAOMI_HTML });
+  });
+  const XM_URL = "https://dev.mi.com/xiaomihyperos/console/app-services/auto-publish-api";
+  async function shadowRunner(pg) {
+    const c = await ctx.newCDPSession(pg);
+    await c.send("DOM.enable"); await c.send("Runtime.enable");
+    return async (fnSrc) => {
+      const { root } = await c.send("DOM.getDocument", { depth: 0 });
+      const { nodeId: hostId } = await c.send("DOM.querySelector", { nodeId: root.nodeId, selector: "#apkgo-assistant-root" });
+      const { node } = await c.send("DOM.describeNode", { nodeId: hostId, pierce: true });
+      const { object } = await c.send("DOM.resolveNode", { backendNodeId: node.shadowRoots[0].backendNodeId });
+      const r = await c.send("Runtime.callFunctionOn", { objectId: object.objectId, functionDeclaration: `function(){ return (${fnSrc})(this); }`, returnByValue: true, awaitPromise: true });
+      if (r.exceptionDetails) throw new Error(r.exceptionDetails.text);
+      return r.result.value;
+    };
+  }
+  const xiaomiBodies = async () => (await (await fetch(`${ORIGIN}/__received`)).json()).filter((x) => x.body.store_name === "xiaomi").map((x) => x.body);
+  const xm = await ctx.newPage();
+  await xm.goto(XM_URL);
+  await xm.waitForSelector("#apkgo-assistant-root", { state: "attached", timeout: 10000 });
+  await xm.waitForTimeout(800);
+  const xmShadow = await shadowRunner(xm);
+  const xmMsg = () => xmShadow(`(sr) => (sr.querySelector('.msg')||{}).textContent`);
+  const xmBtn = () => xmShadow(`(sr) => { const b = sr.querySelector('[data-oneclick]'); return b && b.textContent.trim(); }`);
+  await xmShadow(`(sr) => { if (!sr.querySelector('.panel').classList.contains('open')) sr.querySelector('.launch').click(); }`);
+  await xm.waitForTimeout(400);
+  const keys = await xm.evaluate(() => window.__keys);
+
+  await xmShadow(`(sr) => sr.querySelector('[data-oneclick]').click()`);
+  await xm.waitForTimeout(3000);
+  let xb = await xiaomiBodies();
+  step("xiaomi one-click", { msg: await xmMsg(), btn: await xmBtn(), submissions: xb.length, email: xb[0] && xb[0].config.email, keyOk: !!xb[0] && xb[0].config.private_key === keys[0], resets: await xm.evaluate(() => window.__resets) });
+  if (xb.length !== 1 || xb[0].config.private_key !== keys[0] || xb[0].config.email !== "dev@example.com") throw new Error("小米一键没有存下「获取私钥」里的私钥：" + JSON.stringify(xb[0] && { email: xb[0].config.email, key: xb[0].config.private_key }));
+  if (await xm.evaluate(() => window.__resets)) throw new Error("页面上已有私钥，助手却点了重置");
+
+  // 「重置私钥并重新保存」：重置 → 点「确 定」→ 等到新私钥 → 存新私钥，服务端换到原来那条上
+  await xmShadow(`(sr) => sr.querySelector('[data-oneclick]').click()`);
+  await xm.waitForTimeout(3500);
+  xb = await xiaomiBodies();
+  step("xiaomi reset", { msg: await xmMsg(), submissions: xb.length, keyOk: !!xb[1] && xb[1].config.private_key === keys[1], resets: await xm.evaluate(() => window.__resets) });
+  if (xb.length !== 2 || xb[1].config.private_key !== keys[1]) throw new Error("小米重置后没有存下新私钥");
+  if (!/换到/.test(await xmMsg())) throw new Error("小米重置后面板没说明新私钥换到了原来那条凭证上：" + (await xmMsg()));
+
+  // 重置了但新私钥没出来：报错，不存旧私钥
+  await xm.evaluate(() => { window.__stuck = true; });
+  await xmShadow(`(sr) => sr.querySelector('[data-oneclick]').click()`);
+  await xm.waitForTimeout(12500);
+  xb = await xiaomiBodies();
+  step("xiaomi reset stuck", { msg: await xmMsg(), submissions: xb.length });
+  if (xb.length !== 2) throw new Error("重置后没读到新私钥，助手却又提交了：" + JSON.stringify(xb[xb.length - 1].config.private_key));
+  if (!/没出现新的私钥/.test(await xmMsg())) throw new Error("重置卡住时没有报错：" + (await xmMsg()));
+  await xm.close();
+
+  // 页面上没有私钥：不替用户重置，高亮按钮让用户自己点
+  const xm2 = await ctx.newPage();
+  await xm2.goto(XM_URL + "?nokey=1");
+  await xm2.waitForSelector("#apkgo-assistant-root", { state: "attached", timeout: 10000 });
+  await xm2.waitForTimeout(800);
+  const xm2Shadow = await shadowRunner(xm2);
+  await xm2Shadow(`(sr) => { if (!sr.querySelector('.panel').classList.contains('open')) sr.querySelector('.launch').click(); }`);
+  await xm2.waitForTimeout(400);
+  await xm2Shadow(`(sr) => sr.querySelector('[data-oneclick]').click()`);
+  await xm2.waitForTimeout(6000);
+  xb = await xiaomiBodies();
+  const noKey = { msg: await xm2Shadow(`(sr) => (sr.querySelector('.msg')||{}).textContent`), submissions: xb.length, modalOpened: await xm2.evaluate(() => document.getElementById("modal").classList.contains("on")), highlighted: await xm2.evaluate(() => document.getElementById("reset").classList.contains("apkgo-glow-target")) };
+  step("xiaomi no key", noKey);
+  if (noKey.submissions !== 2 || noKey.modalOpened || !noKey.highlighted || !/没读到私钥/.test(noKey.msg)) throw new Error("页面没有私钥时助手的处理不对：" + JSON.stringify(noKey));
+  await xm2.close();
+
   // 8. 弹窗页能打开、显示已连接
   const popup = await ctx.newPage();
   await popup.goto(`chrome-extension://${new URL(sw.url()).host}/src/popup/popup.html`);

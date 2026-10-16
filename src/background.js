@@ -89,7 +89,8 @@ const handlers = {
     if (appId) body.app_id = appId;
     const r = await apkgoFetch("/openapi/v1/credentials", { method: "POST", body: JSON.stringify(body) });
     if (!r.ok) return r;
-    return { ok: true, credential: { id: r.data.id, verified: !!r.data.verified, label: r.data.label } };
+    // replaced：小米新私钥直接换到了原来那条凭证上（同一账号只有一把有效私钥），没有新建。
+    return { ok: true, credential: { id: r.data.id, verified: !!r.data.verified, label: r.data.label, replaced: !!r.data.replaced } };
   },
 
   async openConsole({ store, url }) {

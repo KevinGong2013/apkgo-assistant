@@ -758,7 +758,9 @@
     busy = false;
     if (r.ok) {
       const link = `<a href="${esc(paired.origin)}/credentials" target="_blank" rel="noopener">在 apkgo 里查看</a>`;
-      result = r.credential.verified
+      result = r.credential.replaced
+        ? { kind: "ok", html: `${esc(recipe.cn)}验证通过，新密钥已换到 apkgo 里原来那条凭证「${esc(r.credential.label)}」上，绑定它的应用照常发布。${link}` }
+        : r.credential.verified
         ? { kind: "ok", html: `已保存，${esc(recipe.cn)}验证通过。${link}，或者继续采集下一家。` }
         : { kind: "ok", html: `已保存。${esc(recipe.cn)}这次没能完成验证（接口没探到或被跳过），发布时仍会用它。${link}` };
       if (capturedFp) lastSaved = capturedFp;

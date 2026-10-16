@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>自动发布接口 - 小米开放平台</title>
+<style>
+  body { font-family: sans-serif; margin: 0; }
+  header { padding: 12px 24px; border-bottom: 1px solid #eee; }
+  .auto-publish-api_item__CeYdz { margin: 16px 24px; }
+  .auto-publish-api_buttonGroup__7cXKg { display: flex; gap: 8px; align-items: center; }
+  .auto-publish-api_download_button__lEwiq { width: 388px; padding: 8px; background: #f5f6f8; }
+  .mdu-modal { display: none; position: fixed; inset: 0; background: rgba(0, 0, 0, .3); }
+  .mdu-modal.on { display: block; }
+  .mdu-modal-content { background: #fff; margin: 160px auto; width: 360px; padding: 16px; }
+</style>
+</head>
+<body>
+<!-- 照 2026-10 实登页面的结构做的桩（类名是 CSS Modules 带哈希的）。header 里那串
+     48 位十六进制是诱饵：旧版助手扫整页取第一个 40~64 位长串，会把它当成私钥。 -->
+<div id="root"><div class="wrapper"><div class="base_base-layout__sGNkx">
+  <header class="base_header__VN-oN" id="xiaomihyperos-console-header">
+    <span class="user-name">开发者</span>
+    <span>会话：9f1c2b3a4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f70</span>
+  </header>
+  <div class="main_content__9Zv3B"><div class="auto-publish-api_container__8V4-u">
+    <div class="auto-publish-api_header__3xQIX">自动发布接口</div>
+    <div class="auto-publish-api_guide__x2PE5">使用指南 · Demo 下载 · Java8示例 · Python3示例</div>
+    <div class="auto-publish-api_version__dNPAt">
+      <div class="auto-publish-api_header__3xQIX">版本状态</div>
+      <div class="auto-publish-api_body__+RFxu">
+        <div class="auto-publish-api_item__CeYdz">
+          <span class="auto-publish-api_subTitle__M8hJt">获取公钥</span>
+          <div class="auto-publish-api_download_button__lEwiq"><span>下载公钥文件</span></div>
+        </div>
+        <div class="auto-publish-api_item__CeYdz">
+          <span class="auto-publish-api_subTitle__M8hJt">获取私钥</span>
+          <div class="auto-publish-api_buttonGroup__7cXKg">
+            <div class="auto-publish-api_download_button__lEwiq"><span id="key" style="color: rgb(181, 188, 199); font-size: 14px;"></span></div>
+            <button type="button" class="mdu-btn mdu-btn-default" id="copy"><span>复制私钥</span></button>
+            <button type="button" class="mdu-btn mdu-btn-primary" id="reset"><span>重置私钥</span></button>
+          </div>
+          <span class="auto-publish-api_tips__rzw9G">私钥生效规则：1.未获取私钥：接口描述的密码为开发者账号登录密码 2.已获取私钥：接口描述的密码为私钥字符串 3.重置私钥：接口将会以最新的私钥为准</span>
+        </div>
+      </div>
+    </div>
+  </div></div>
+</div></div></div>
+<div class="mdu-modal" id="modal">
+  <div class="mdu-modal-content" role="dialog">
+    <p>重置后原私钥立即失效，确定重置吗？</p>
+    <button type="button" class="mdu-btn" id="cancel"><span>取 消</span></button>
+    <button type="button" class="mdu-btn mdu-btn-primary" id="ok"><span>确 定</span></button>
+  </div>
+</div>
+<script>
+  document.cookie = "mideveloper_ph=ph-test; path=/";
+  document.cookie = "userId=10086; path=/";
+  // 测试用假私钥，形状同真私钥（50 位小写字母数字）。
+  const KEYS = ["k0", "k1", "k2", "k3"].map((p) => (p + "testkeyabcdefghijklmnopqrstuvwxyz0123456789abcdefgh").slice(0, 50));
+  window.__keys = KEYS;
+  window.__resets = 0;  // 真正完成的重置次数（点了「确 定」才算）
+  window.__stuck = false; // 置 true 时「确 定」不生效，新私钥永远不出现
+  const keyEl = document.getElementById("key");
+  const modal = document.getElementById("modal");
+  let current = new URLSearchParams(location.search).get("nokey") ? "" : KEYS[0];
+  // 私钥是页面异步拉回来的：先渲染骨架，600ms 后私钥才到。
+  setTimeout(() => { keyEl.textContent = current; }, 600);
+  document.getElementById("reset").onclick = () => modal.classList.add("on");
+  document.getElementById("cancel").onclick = () => modal.classList.remove("on");
+  document.getElementById("ok").onclick = () => {
+    modal.classList.remove("on");
+    if (window.__stuck) return;
+    window.__resets++;
+    current = KEYS[window.__resets];
+    setTimeout(() => { keyEl.textContent = current; }, 400);
+  };
+</script>
+</body>
+</html>

@@ -117,12 +117,12 @@ const APKGO_RECIPES = [
     hideWizardFields: true,
     prereq: [
       "请用主账号；团队子账号可能没有「自动发布」入口",
-      "私钥每次「重置」都会变，重置后要重新采集",
+      "账号还没有私钥时，先在页面上点「重置私钥」生成一个；助手不会替你重置",
       "公钥由 apkgo 内置，无需下载上传",
     ],
     doneBtnText: "重置私钥并重新保存",
-    doneHint: "小米仅支持一把私钥；重置后旧私钥失效，点击上方按钮将自动在后台重置并同步至 apkgo。",
-    wizardHint: "全自动流程：扩展会自动调取开发者邮箱并提取私钥（未生成时自动生成），直接保存并验证。",
+    doneHint: "小米一个账号只有一把私钥，重置后旧私钥立即失效。点上方按钮会在后台重置，并把新私钥换到 apkgo 里原来那条小米凭证上。",
+    wizardHint: "全自动流程：扩展会自动调取开发者邮箱、读取页面上的私钥，直接保存并验证。不会替你重置私钥。",
     progressOrder: ["goto", "filling", "saving", "done"],
     progressLabels: {
       filling: "自动获取邮箱与私钥",
@@ -131,49 +131,22 @@ const APKGO_RECIPES = [
     steps: [
       { t: "登录小米开放平台 → 管理中心", d: "用主账号。" },
       { t: "左侧菜单「应用服务 → 自动发布接口」", d: "直达接口配置页面。", action: "goto" },
-      { t: "获取邮箱与私钥，保存并验证", d: "扩展会自动从后台调取开发者邮箱并提取私钥。", action: "fetch-key" },
+      { t: "获取邮箱与私钥，保存并验证", d: "扩展会自动从后台调取开发者邮箱，并读取「获取私钥」里的私钥。", action: "fetch-key" },
     ],
     fields: [
       { key: "email", label: "开发者账号邮箱", kind: "text", hints: [/邮箱|e-?mail|账号/i], pattern: /^[^\s@]+@[^\s@]+\.[^\s@]+$/, required: true },
       { key: "private_key", label: "私钥", kind: "secret", hints: [/私钥|private\s*key|password|密码/i], pattern: /^[A-Za-z0-9+/=_-]{16,}$/, required: true },
     ],
     preload: async () => {
-      try {
-        const phMatch = document.cookie.match(/mideveloper_ph=([^;]+)/);
-        const uidMatch = document.cookie.match(/\buserId=([^;]+)/);
-        if (!phMatch || !uidMatch) return null;
-        const url = `/pltapi/uiue/user?edit=1&mideveloper_ph=${encodeURIComponent(phMatch[1])}&userId=${encodeURIComponent(uidMatch[1])}`;
-        const r = await fetch(url, { credentials: "include" });
-        if (!r.ok) return null;
-        const d = await r.json();
-        const email = d && d.data && d.data.email;
-        if (email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { email };
-      } catch { /* ignore */ }
-      return null;
+      const email = await xiaomiEmail();
+      return email ? { email } : null;
     },
     detect: async (h) => {
       const out = {};
-      try {
-        const phMatch = document.cookie.match(/mideveloper_ph=([^;]+)/);
-        const uidMatch = document.cookie.match(/\buserId=([^;]+)/);
-        if (phMatch && uidMatch) {
-          const url = `/pltapi/uiue/user?edit=1&mideveloper_ph=${encodeURIComponent(phMatch[1])}&userId=${encodeURIComponent(uidMatch[1])}`;
-          const r = await fetch(url, { credentials: "include" });
-          if (r.ok) {
-            const d = await r.json();
-            if (d && d.data && d.data.email) out.email = d.data.email;
-          }
-        }
-      } catch { /* ignore */ }
-
-      for (const doc of h.docs()) {
-        const text = (doc.body && doc.body.innerText) || "";
-        const matches = text.match(/\b[a-zA-Z0-9]{40,64}\b/g) || [];
-        for (const m of matches) {
-          if (!/已生成|mideveloper|openplatform/i.test(m)) { out.private_key = m; break; }
-        }
-        if (out.private_key) break;
-      }
+      const email = await xiaomiEmail();
+      if (email) out.email = email;
+      const key = xiaomiKeyIn(xiaomiKeySection(h), h);
+      if (key) out.private_key = key;
       return out;
     },
     isLoggedIn: async (h) => {
@@ -192,76 +165,52 @@ const APKGO_RECIPES = [
     flow: ["fetch-key"],
     actions: {
       "fetch-key": async (h) => {
-        // 1. 登录检查与调取邮箱
-        const phMatch = document.cookie.match(/mideveloper_ph=([^;]+)/);
-        const uidMatch = document.cookie.match(/\buserId=([^;]+)/);
-        if (/login|account\.xiaomi\.com/i.test(location.href) || (!phMatch && !uidMatch && !h.draft.config.email)) {
+        if (/login|account\.xiaomi\.com/i.test(location.href)) {
           throw new Error("检测到您尚未登录小米开放平台，请先登录开发者账号后再获取密钥。");
         }
-        if (!h.draft.config.email) {
-          try {
-            if (phMatch && uidMatch) {
-              const url = `/pltapi/uiue/user?edit=1&mideveloper_ph=${encodeURIComponent(phMatch[1])}&userId=${encodeURIComponent(uidMatch[1])}`;
-              const r = await fetch(url, { credentials: "include" });
-              if (r.ok) {
-                const d = await r.json();
-                if (d && d.data && d.data.email) h.draft.config.email = d.data.email;
-              }
-            }
-          } catch { /* ignore */ }
-        }
+        // 1. 邮箱每次都按当前登录的账号重新取，不沿用草稿里的：同一会话里换过
+        //    账号时，旧邮箱配新私钥，发布时就是 -20014 密码错误。
+        h.draft.config.email = (await xiaomiEmail()) || h.draft.config.email;
         if (!h.draft.config.email) {
           throw new Error("未能自动获取到开发者邮箱，请确认已登录小米开放平台。");
         }
 
-        // 2. 查找页面上的私钥
-        const findKey = (exclude) => {
-          for (const doc of h.docs()) {
-            const text = (doc.body && doc.body.innerText) || "";
-            const matches = text.match(/\b[a-zA-Z0-9]{40,64}\b/g) || [];
-            for (const m of matches) {
-              if (!/已生成|mideveloper|openplatform/i.test(m) && m !== exclude) return m;
-            }
-            for (const inp of doc.querySelectorAll("input, textarea")) {
-              const v = (inp.value || inp.placeholder || "").trim();
-              if (/^[a-zA-Z0-9]{40,64}$/.test(v) && !/已生成/.test(v) && v !== exclude) return v;
-            }
-          }
-          return "";
-        };
-
-        let currentKey = findKey();
-        let key = currentKey;
-
-        // 如果明确是重置（isReset）或者页面上没有当前明文私钥，自动点击重置/生成
-        if (h.isReset || !key) {
-          const btn = h.byText("button, a, div, span", /^重置私钥$/) ||
-                      h.byText("button, a, div, span", /^生成私钥$/) ||
-                      h.byText("button, a", /重置私钥|生成私钥/);
-          if (btn) {
-            btn.click();
-            await h.wait(400);
-            for (const doc of h.docs()) {
-              const confirmBtn = [...doc.querySelectorAll(".el-dialog button, .el-message-box button, .ant-modal button, button")]
-                .find((b) => /^(确定|确认)$/.test(h.textOf(b).trim()) && b.getClientRects().length);
-              if (confirmBtn) { confirmBtn.click(); break; }
-            }
-            key = (await h.waitFor(() => {
-              const k = findKey(h.isReset ? currentKey : undefined);
-              return (h.isReset && currentKey) ? (k && k !== currentKey ? k : null) : k;
-            }, 5000)) || findKey();
-          }
+        // 2. 等「获取私钥」那一块和里面的私钥渲染出来（私钥是页面异步拉的）。
+        const section = await h.waitFor(() => xiaomiKeySection(h), 8000);
+        if (!section) {
+          throw new Error("页面上没找到「获取私钥」。请确认停在「应用服务 → 自动发布接口」并已加载完，再点一次。");
         }
+        const current = (await h.waitFor(() => xiaomiKeyIn(xiaomiKeySection(h), h), 4000)) || "";
 
-        if (!key) {
-          const btn = h.byText("button, a, div, span", /^(重置私钥|生成私钥)$/) || h.byText("button, a", /重置私钥|生成私钥/);
+        if (!h.isReset) {
+          if (current) {
+            h.draft.config.private_key = current;
+            return `已自动获取邮箱（${h.draft.config.email}）与私钥！正在保存并验证…`;
+          }
+          // 没读到私钥：可能账号从没生成过，也可能页面还没加载完。重置会让
+          // 已在用的私钥立刻失效（apkgo 里存的那把也一起作废），所以不替用户点。
+          const btn = xiaomiResetBtn(section, h);
           if (btn) h.highlight(btn);
-          const btnName = btn ? h.textOf(btn).trim() : "重置私钥";
-          throw new Error(`未能自动提取到私钥。请在页面上点击绿框高亮的「${btnName}」，然后再点「一键获取密钥」。`);
+          const btnName = btn ? h.textOf(btn).replace(/\s+/g, "") : "重置私钥";
+          throw new Error(`页面上没读到私钥。如果这个账号确实还没有私钥，请点绿框里的「${btnName}」生成一个，再点「一键获取密钥」；如果页面还没加载完，刷新后再试。`);
         }
 
-        h.draft.config.private_key = key;
-        return `已自动获取邮箱（${h.draft.config.email}）与私钥！正在保存并验证…`;
+        // 3. 用户明确点了「重置私钥并重新保存」：重置 → 确认 → 等一把和原来不同的新私钥。
+        //    等不到就报错，绝不退回旧私钥——它刚被重置作废了。
+        const btn = xiaomiResetBtn(section, h);
+        if (!btn) throw new Error("页面上没找到「重置私钥」按钮。");
+        btn.click();
+        const ok = await h.waitFor(() => xiaomiConfirmBtn(h), 3000);
+        if (ok) ok.click();
+        const fresh = await h.waitFor(() => {
+          const k = xiaomiKeyIn(xiaomiKeySection(h), h);
+          return k && k !== current ? k : null;
+        }, 10000);
+        if (!fresh) {
+          throw new Error("已点「重置私钥」，但页面上没出现新的私钥。如果弹出了确认框，请点确认，然后点「一键获取密钥」读取新私钥（不用再重置）。");
+        }
+        h.draft.config.private_key = fresh;
+        return `已重置并获取新私钥（邮箱 ${h.draft.config.email}）！正在保存并验证…`;
       },
     },
   },
@@ -895,3 +844,68 @@ const APKGO_RECIPES = [
     fields: [],
   },
 ];
+
+// ---- 小米：「自动发布接口」页的私钥读取 ----
+// 页面上「获取私钥」是一块：小标题 + 私钥文本 + 「复制私钥」「重置私钥」按钮。
+// 私钥只在这一块里找，不扫整页：整页里别的长串（ID、哈希）会被错当成私钥，
+// 存进 apkgo 后发布时就是 -20014 密码错误。类名是 CSS Modules 带哈希的
+// （auto-publish-api_item__CeYdz），只按前缀认，认不到就退到小标题的父元素。
+const XIAOMI_KEY_RE = /^[A-Za-z0-9]{32,128}$/;
+const xiaomiNorm = (t) => String(t || "").replace(/\s+/g, "");
+
+function xiaomiKeySection(h) {
+  for (const doc of h.docs()) {
+    const title = [...doc.querySelectorAll("span, div, p, h3, h4, label")]
+      .find((el) => !el.children.length && !el.closest("button") && xiaomiNorm(h.textOf(el)) === "获取私钥");
+    if (title) return title.closest('[class*="auto-publish-api_item"]') || title.parentElement;
+  }
+  return null;
+}
+
+function xiaomiKeyIn(section, h) {
+  if (!section) return "";
+  for (const inp of section.querySelectorAll("input, textarea")) {
+    const v = (inp.value || "").trim();
+    if (XIAOMI_KEY_RE.test(v)) return v;
+  }
+  for (const el of section.querySelectorAll("*")) {
+    if (el.children.length || el.closest("button")) continue;
+    const v = h.textOf(el);
+    if (XIAOMI_KEY_RE.test(v)) return v;
+  }
+  return "";
+}
+
+function xiaomiResetBtn(section, h) {
+  const re = /^(重置私钥|生成私钥|获取私钥)$/;
+  const inSection = section && [...section.querySelectorAll("button, a, [role='button']")]
+    .find((b) => re.test(xiaomiNorm(h.textOf(b))) && b.getClientRects().length);
+  return inSection || h.byText("button, a", /重置私钥|生成私钥/);
+}
+
+// 重置后的确认框。按钮文字按去空白比：antd 系按钮会把两个汉字排成「确 定」。
+function xiaomiConfirmBtn(h) {
+  const sel = '[role="dialog"] button, [class*="modal"] button, [class*="popconfirm"] button, [class*="popover"] button, [class*="message-box"] button';
+  for (const doc of h.docs()) {
+    for (const b of doc.querySelectorAll(sel)) {
+      if (/^(确定|确认|确认重置|重置)$/.test(xiaomiNorm(h.textOf(b))) && b.getClientRects().length) return b;
+    }
+  }
+  return null;
+}
+
+// 当前登录账号的开发者邮箱（小米 API 的 userName），取不到返回 ""。
+async function xiaomiEmail() {
+  try {
+    const ph = document.cookie.match(/mideveloper_ph=([^;]+)/);
+    const uid = document.cookie.match(/\buserId=([^;]+)/);
+    if (!ph || !uid) return "";
+    const r = await fetch(`/pltapi/uiue/user?edit=1&mideveloper_ph=${encodeURIComponent(ph[1])}&userId=${encodeURIComponent(uid[1])}`, { credentials: "include" });
+    if (!r.ok) return "";
+    const d = await r.json();
+    const email = d && d.data && d.data.email;
+    return email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : "";
+  } catch {
+    return "";
+  }
+}
