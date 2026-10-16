@@ -197,22 +197,27 @@ try {
   if (tcMap["com.yuxiaor"] !== "1105678901" || tcMap["com.yuxiaor.misu"] !== "1105678902") throw new Error("应用宝没有从页面自己的返回里自动合成 app_id_map：" + JSON.stringify(tcMap));
   await tc.screenshot({ path: path.join(HERE, "../../dist/shots/08-tencent.png") });
 
-  // 7d. 小米：私钥只从「获取私钥」那一块读（页面上更靠前的长串不算）；读到就不碰「重置私钥」；
-  //     助手绝不自己调 getPrivateKey（每调一次就生成一把新私钥），只读页面发过的返回；
-  //     「重置私钥并重新保存」拿到新私钥才存，拿不到就报错，绝不存回刚作废的旧私钥；
-  //     页面上没有私钥时不替用户生成，用户自己点了「生成私钥」后再一键就能取到。
+  // 7d. 小米（照 2026-10 读到的页面代码）：页面打开时只查「有没有私钥」，已生成的私钥从不下发；
+  //     「获取私钥」（首次）和「重置私钥」→「确认重置」都调 getPrivateKey 生成新私钥。所以：
+  //     - 拿私钥必须重置或首次生成，助手先在面板上请用户确认，绝不自己点、更不自己调 getPrivateKey；
+  //     - 页面在状态返回前一律显示「获取私钥」，不能据此当成没有私钥（否则「获取」= 无确认框的重置）；
+  //     - 新私钥从页面收到的 getPrivateKey 返回里取；拿不到就报错，绝不存回旧私钥；
+  //     - 私钥只认「获取私钥」那一块（页面上更靠前的长串不算）。
   const XIAOMI_HTML = fs.readFileSync(path.join(HERE, "fixtures/xiaomi.html"), "utf8");
   // 测试用假私钥，形状同真私钥（50 位小写字母数字）。
-  const XM_KEYS = ["k0", "k1", "k2", "k3", "k4"].map((p) => (p + "testkeyabcdefghijklmnopqrstuvwxyz0123456789abcdefgh").slice(0, 50));
-  // 小米后台的私钥状态：key 当前私钥（"" = 还没有）；stuck 时 getPrivateKey 失败；
-  // generated 页面成功生成的次数；extCalls 不是页面发的 getPrivateKey 请求数（必须一直是 0）。
+  const XM_KEYS = ["k0", "k1", "k2", "k3", "k4", "k5"].map((p) => (p + "testkeyabcdefghijklmnopqrstuvwxyz0123456789abcdefgh").slice(0, 50));
+  // 小米后台的私钥状态：key 当前私钥（"" = 还没有）；stuck 时 getPrivateKey 失败；generated 生成次数；
+  // extCalls 不是页面发的 getPrivateKey 请求数（必须一直是 0）。状态接口晚 1.5 秒返回，测「状态没到别下结论」。
   const xmState = { key: XM_KEYS[0], next: 1, stuck: false, generated: 0, extCalls: 0 };
   const xmJSON = (route, body) => route.fulfill({ contentType: "application/json", body: JSON.stringify(body) });
-  await ctx.route("https://dev.mi.com/**", (route) => {
+  await ctx.route("https://dev.mi.com/**", async (route) => {
     const req = route.request();
     const u = req.url();
     if (u.includes("/pltapi/uiue/user")) return xmJSON(route, { code: 0, data: { email: "dev@example.com" } });
-    if (u.includes("/__fixture/key")) return xmJSON(route, { code: 0, data: xmState.key });
+    if (u.includes("/pltapi/uiue/devtool/getPrivateKeyStatus")) {
+      await new Promise((r) => setTimeout(r, 1500));
+      return xmJSON(route, { code: 0, data: !!xmState.key, msg: "success" });
+    }
     if (u.includes("/pltapi/uiue/devtool/getPrivateKey")) {
       if (req.headers()["x-fixture"] !== "page") xmState.extCalls++;
       if (xmState.stuck) return xmJSON(route, { code: 500, data: null, msg: "系统繁忙" });
@@ -240,66 +245,93 @@ try {
     const pg = await ctx.newPage();
     await pg.goto(url);
     await pg.waitForSelector("#apkgo-assistant-root", { state: "attached", timeout: 10000 });
-    await pg.waitForTimeout(800);
+    await pg.waitForTimeout(300);
     const sh = await shadowRunner(pg);
     await sh(`(sr) => { if (!sr.querySelector('.panel').classList.contains('open')) sr.querySelector('.launch').click(); }`);
-    await pg.waitForTimeout(400);
-    return { pg, sh, msg: () => sh(`(sr) => (sr.querySelector('.msg')||{}).textContent`), click: () => sh(`(sr) => sr.querySelector('[data-oneclick]').click()`) };
+    await pg.waitForTimeout(200);
+    return {
+      pg, sh,
+      msg: () => sh(`(sr) => (sr.querySelector('.msg')||{}).textContent`),
+      btn: () => sh(`(sr) => { const b = sr.querySelector('[data-oneclick]'); return b && b.textContent.trim(); }`),
+      click: () => sh(`(sr) => sr.querySelector('[data-oneclick]').click()`),
+    };
   }
   const xiaomiBodies = async () => (await (await fetch(`${ORIGIN}/__received`)).json()).filter((x) => x.body.store_name === "xiaomi").map((x) => x.body);
   const noExtCalls = () => { if (xmState.extCalls) throw new Error(`助手自己调了 ${xmState.extCalls} 次 getPrivateKey（每调一次就重置一次私钥）`); };
+  const modalOpen = (pg) => pg.evaluate(() => document.getElementById("modal").classList.contains("on"));
 
+  // A. 已有私钥，状态还没返回时就点一键：不能当成「没有私钥」去点「获取私钥」；等到状态后请用户确认重置
   const xm = await openXiaomi(XM_URL);
-  await xm.click();
-  await xm.pg.waitForTimeout(3000);
-  let xb = await xiaomiBodies();
-  step("xiaomi one-click", { msg: await xm.msg(), submissions: xb.length, email: xb[0] && xb[0].config.email, keyOk: !!xb[0] && xb[0].config.private_key === XM_KEYS[0], generated: xmState.generated, extCalls: xmState.extCalls });
-  if (xb.length !== 1 || xb[0].config.private_key !== XM_KEYS[0] || xb[0].config.email !== "dev@example.com") throw new Error("小米一键没有存下「获取私钥」里的私钥：" + JSON.stringify(xb[0] && { email: xb[0].config.email, key: xb[0].config.private_key }));
-  if (xmState.generated) throw new Error("页面上已有私钥，助手却重置了");
-  noExtCalls();
-
-  // 「重置私钥并重新保存」：重置 → 点「确 定」→ 页面调 getPrivateKey → 从它的返回里取新私钥。
-  // 这次让页面不更新显示，证明新私钥是从返回里拿到的，不是等页面显示。
-  await xm.pg.evaluate(() => { window.__noDomUpdate = true; });
+  const btnAtClick = await xm.pg.locator("#reset").innerText();
   await xm.click();
   await xm.pg.waitForTimeout(3500);
+  let xb = await xiaomiBodies();
+  const askReset = { pageBtnAtClick: btnAtClick, msg: await xm.msg(), btn: await xm.btn(), submissions: xb.length, generated: xmState.generated, modal: await modalOpen(xm.pg) };
+  step("xiaomi has key → ask", askReset);
+  if (askReset.btn !== "重置私钥并保存" || !/只能重置/.test(askReset.msg) || askReset.generated || askReset.submissions || askReset.modal) throw new Error("已有私钥时助手没有先请用户确认重置：" + JSON.stringify(askReset));
+  noExtCalls();
+
+  // B. 用户点「重置私钥并保存」：助手点「重置私钥」→「确认重置」→ 从 getPrivateKey 返回里取新私钥。
+  //    这次让页面不更新显示，证明新私钥是从返回里拿到的。
+  await xm.pg.evaluate(() => { window.__noDomUpdate = true; });
+  await xm.click();
+  await xm.pg.waitForTimeout(5000);
   xb = await xiaomiBodies();
-  step("xiaomi reset", { msg: await xm.msg(), submissions: xb.length, keyOk: !!xb[1] && xb[1].config.private_key === XM_KEYS[1], generated: xmState.generated, extCalls: xmState.extCalls });
-  if (xb.length !== 2 || xb[1].config.private_key !== XM_KEYS[1]) throw new Error("小米重置后没有从 getPrivateKey 的返回里取到新私钥");
-  if (!/换到/.test(await xm.msg())) throw new Error("小米重置后面板没说明新私钥换到了原来那条凭证上：" + (await xm.msg()));
+  step("xiaomi confirmed reset", { msg: await xm.msg(), btn: await xm.btn(), submissions: xb.length, email: xb[0] && xb[0].config.email, keyOk: !!xb[0] && xb[0].config.private_key === XM_KEYS[1], generated: xmState.generated });
+  if (xb.length !== 1 || xb[0].config.private_key !== XM_KEYS[1] || xb[0].config.email !== "dev@example.com") throw new Error("确认重置后没有从 getPrivateKey 返回里取到新私钥：" + JSON.stringify(xb[0] && { email: xb[0].config.email, key: xb[0].config.private_key }));
   noExtCalls();
   await xm.pg.evaluate(() => { window.__noDomUpdate = false; });
 
-  // 重置时 getPrivateKey 失败、新私钥没出来：报错，不存旧私钥
+  // C. 完成后「重置私钥并重新保存」：再重置一次，服务端把新私钥换到原来那条上
+  await xm.click();
+  await xm.pg.waitForTimeout(5000);
+  xb = await xiaomiBodies();
+  step("xiaomi reset again", { msg: await xm.msg(), submissions: xb.length, keyOk: !!xb[1] && xb[1].config.private_key === XM_KEYS[2], generated: xmState.generated });
+  if (xb.length !== 2 || xb[1].config.private_key !== XM_KEYS[2]) throw new Error("「重置私钥并重新保存」没有存下新私钥");
+  if (!/换到/.test(await xm.msg())) throw new Error("再次重置后面板没说明新私钥换到了原来那条凭证上：" + (await xm.msg()));
+  noExtCalls();
+
+  // D. 重置时 getPrivateKey 失败、新私钥没出来：报错，不存旧私钥（页面上还显示着上一把）
   xmState.stuck = true;
   await xm.click();
-  await xm.pg.waitForTimeout(12500);
+  await xm.pg.waitForTimeout(19000);
   xmState.stuck = false;
   xb = await xiaomiBodies();
   step("xiaomi reset stuck", { msg: await xm.msg(), submissions: xb.length });
   if (xb.length !== 2) throw new Error("重置后没拿到新私钥，助手却又提交了：" + JSON.stringify(xb[xb.length - 1].config.private_key));
-  if (!/没出现新的私钥/.test(await xm.msg())) throw new Error("重置卡住时没有报错：" + (await xm.msg()));
+  if (!/没拿到新的私钥/.test(await xm.msg())) throw new Error("重置卡住时没有报错：" + (await xm.msg()));
   noExtCalls();
   await xm.pg.close();
 
-  // 账号还没有私钥：不替用户生成，高亮「生成私钥」；用户点了之后再一键，取到刚生成的那把
+  // E. 账号还没有私钥：请用户确认「生成私钥并保存」→ 助手点「获取私钥」（没有确认框）→ 取到新私钥
   xmState.key = "";
   const xm2 = await openXiaomi(XM_URL);
   await xm2.click();
-  await xm2.pg.waitForTimeout(6000);
-  xb = await xiaomiBodies();
-  const noKey = { msg: await xm2.msg(), submissions: xb.length, generated: xmState.generated, highlighted: await xm2.pg.evaluate(() => document.getElementById("reset").classList.contains("apkgo-glow-target")), btn: await xm2.pg.locator("#reset").innerText() };
-  step("xiaomi no key", noKey);
-  if (noKey.submissions !== 2 || noKey.generated !== 1 || !noKey.highlighted || !/没读到私钥/.test(noKey.msg)) throw new Error("页面没有私钥时助手的处理不对：" + JSON.stringify(noKey));
-  await xm2.pg.click("#reset"); // 用户自己点「生成私钥」
-  await xm2.pg.waitForTimeout(1200);
+  await xm2.pg.waitForTimeout(3500);
+  const askGen = { msg: await xm2.msg(), btn: await xm2.btn(), generated: xmState.generated };
+  step("xiaomi no key → ask", askGen);
+  if (askGen.btn !== "生成私钥并保存" || !/还没有私钥/.test(askGen.msg) || askGen.generated !== 2) throw new Error("没有私钥时助手没有先请用户确认生成：" + JSON.stringify(askGen));
   await xm2.click();
-  await xm2.pg.waitForTimeout(3000);
+  await xm2.pg.waitForTimeout(4000);
   xb = await xiaomiBodies();
-  step("xiaomi after user generated", { msg: await xm2.msg(), submissions: xb.length, keyOk: !!xb[2] && xb[2].config.private_key === xmState.key, generated: xmState.generated });
-  if (xb.length !== 3 || xb[2].config.private_key !== xmState.key) throw new Error("用户生成私钥后一键没有取到新私钥");
+  step("xiaomi confirmed generate", { msg: await xm2.msg(), submissions: xb.length, keyOk: !!xb[2] && xb[2].config.private_key === XM_KEYS[3], generated: xmState.generated, modal: await modalOpen(xm2.pg) });
+  if (xb.length !== 3 || xb[2].config.private_key !== XM_KEYS[3]) throw new Error("确认生成后没有存下新私钥");
   noExtCalls();
   await xm2.pg.close();
+
+  // F. 用户自己在页面上点「重置私钥」→「确认重置」，再点一键：直接取到那把，不再请确认、不再重置
+  const xm3 = await openXiaomi(XM_URL);
+  await xm3.pg.waitForTimeout(1800); // 等状态返回，按钮变成「重置私钥」
+  await xm3.pg.click("#reset");
+  await xm3.pg.click("#ok");
+  await xm3.pg.waitForTimeout(1200);
+  await xm3.click();
+  await xm3.pg.waitForTimeout(3000);
+  xb = await xiaomiBodies();
+  step("xiaomi user reset then one-click", { msg: await xm3.msg(), submissions: xb.length, keyOk: !!xb[3] && xb[3].config.private_key === XM_KEYS[4], generated: xmState.generated });
+  if (xb.length !== 4 || xb[3].config.private_key !== XM_KEYS[4] || xmState.generated !== 4) throw new Error("用户自己重置后一键没有直接取到那把私钥");
+  noExtCalls();
+  await xm3.pg.close();
 
   // 8. 弹窗页能打开、显示已连接
   const popup = await ctx.newPage();
