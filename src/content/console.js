@@ -27,6 +27,10 @@
   let stage = "idle";
   // 配方要求跳到另一页继续采集时放这里；由用户点按钮触发，助手不自己跳走。
   let pendingNav = null;
+  // 配方要用户在面板上明确同意才做的下一步（小米：重置/生成私钥会让旧私钥立即失效）。
+  // 配方抛出的错误带 confirm: { kind, label, hint } 时放这里；主按钮换成 label，
+  // 用户点了才带着 confirmed = kind 重跑流程。
+  let pendingConfirm = null;
   let manualOpen = false; // 「手动模式」折叠是否展开；自动流程失败时自动展开
 
   // ---- shadow host ----
@@ -123,8 +127,8 @@
       const wizard = `<div class="sec wizard">
         ${extraFieldsHtml}
         <div class="field"><label>备注名（可选）</label><input class="in" data-k="__label" placeholder="默认「${esc(recipe.cn)}账号」，同一商店多个账号时区分" value="${esc(draft.label)}" ${running ? "disabled" : ""}></div>
-        <button class="btn acc" data-oneclick="1" ${running || !paired ? "disabled" : ""}>${running ? "进行中…" : stage === "done" ? doneText : "一键获取密钥"}</button>
-        ${stage === "idle" ? `<div class="hint">${esc(wizardHint)}</div>` : stage === "done" && recipe.doneHint ? `<div class="hint">${esc(recipe.doneHint)}</div>` : ""}
+        <button class="btn acc" data-oneclick="1" ${running || !paired ? "disabled" : ""}>${running ? "进行中…" : pendingConfirm ? esc(pendingConfirm.label) : stage === "done" ? doneText : "一键获取密钥"}</button>
+        ${pendingConfirm && !running ? `<div class="hint">${esc(pendingConfirm.hint || "")}</div>` : stage === "idle" ? `<div class="hint">${esc(wizardHint)}</div>` : stage === "done" && recipe.doneHint ? `<div class="hint">${esc(recipe.doneHint)}</div>` : ""}
         ${progressHtml()}
         ${pendingNav ? `<button class="btn acc" data-nav="1" style="margin-top:10px">${esc(pendingNav.label)}</button><div class="hint">会打开 ${esc(pendingNav.url.replace(/^https?:\/\//, ""))}，落地后自动接着采集。</div>` : ""}
       </div>`;
@@ -191,7 +195,7 @@
     if (!t) return;
     if (t.dataset.act === "close") return togglePanel(false);
     if (t.dataset.act === "auto") return autoDetect();
-    if (t.dataset.act === "clear") { draft = { label: "", config: {}, files: {}, appId: draft.appId }; result = null; await saveDraft(); return render(); }
+    if (t.dataset.act === "clear") { draft = { label: "", config: {}, files: {}, appId: draft.appId }; result = null; pendingConfirm = null; await saveDraft(); return render(); }
     if (t.dataset.act === "save") return submit();
     if (t.dataset.action) return runAction(t.dataset.action);
     if (t.dataset.oneclick) return oneClick();
@@ -616,6 +620,7 @@
       return true;
     } catch (e) {
       result = { kind: "warn", html: esc(e.message || String(e)) };
+      if (e && e.confirm && e.confirm.kind && e.confirm.label) pendingConfirm = e.confirm;
     }
     busyAction = ""; render();
     return false;
@@ -644,7 +649,11 @@
   async function oneClick() {
     const flow = recipe.flow || [];
     if (!flow.length) return;
-    const isReset = stage === "done";
+    // 「再获取一个」（完成后）和面板上明确同意的那一步，都按重置跑；confirmed 告诉配方
+    // 用户同意的是哪一种，页面状态对不上时配方会重新问。
+    const confirmed = pendingConfirm ? pendingConfirm.kind : stage === "done" ? "reset" : "";
+    const isReset = !!confirmed;
+    pendingConfirm = null;
     result = null;
 
     // 预检：如果尚未登录，提醒用户先登录开发者账号
@@ -674,7 +683,7 @@
     pendingNav = null;
     setStage("filling");
     for (const id of flow) {
-      if (!(await runAction(id, { isReset }))) { autoSave = false; if (!recipe.noManual) manualOpen = true; setStage("error"); return; }
+      if (!(await runAction(id, { isReset, confirmed }))) { autoSave = false; if (!recipe.noManual) manualOpen = true; setStage("error"); return; }
       if (pendingNav) { // 这一步要求换一页继续，等用户点按钮，不自己跳走
         autoSave = false;
         setStage(pendingNav.stage || "filling");
@@ -758,7 +767,9 @@
     busy = false;
     if (r.ok) {
       const link = `<a href="${esc(paired.origin)}/credentials" target="_blank" rel="noopener">在 apkgo 里查看</a>`;
-      result = r.credential.verified
+      result = r.credential.replaced
+        ? { kind: "ok", html: `${esc(recipe.cn)}验证通过，新密钥已换到 apkgo 里原来那条凭证「${esc(r.credential.label)}」上，绑定它的应用照常发布。${link}` }
+        : r.credential.verified
         ? { kind: "ok", html: `已保存，${esc(recipe.cn)}验证通过。${link}，或者继续采集下一家。` }
         : { kind: "ok", html: `已保存。${esc(recipe.cn)}这次没能完成验证（接口没探到或被跳过），发布时仍会用它。${link}` };
       if (capturedFp) lastSaved = capturedFp;

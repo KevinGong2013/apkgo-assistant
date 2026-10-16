@@ -44,6 +44,12 @@ class H(BaseHTTPRequestHandler):
             RECEIVED.append({"headers": {"X-API-Key": self.headers.get("X-API-Key", "")[:14] + "…"}, "body": body})
             if body.get("config", {}).get("client_secret") == "bad":
                 return self._send(400, {"error": "凭证验证失败: token: [10001] invalid client_secret"})
+            # 小米一个账号只有一把有效私钥：同邮箱再存一次，真服务端会把新私钥换到原来那条上。
+            if body.get("store_name") == "xiaomi":
+                email = body.get("config", {}).get("email")
+                prev = [r for r in RECEIVED[:-1] if r["body"].get("store_name") == "xiaomi" and r["body"].get("config", {}).get("email") == email]
+                if prev:
+                    return self._send(200, {"data": {"id": "c-xiaomi", "store_name": "xiaomi", "label": prev[0]["body"].get("label"), "verified": True, "replaced": True}})
             return self._send(201, {"data": {"id": "c1", "store_name": body.get("store_name"), "label": body.get("label"), "verified": True}})
         return self._send(404, {"error": "not found"})
 
