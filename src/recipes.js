@@ -145,7 +145,7 @@ const APKGO_RECIPES = [
       const out = {};
       const email = await xiaomiEmail();
       if (email) out.email = email;
-      const key = xiaomiKeyIn(xiaomiKeySection(h), h);
+      const key = (await xiaomiSniffedKey(h)) || xiaomiKeyIn(xiaomiKeySection(h), h);
       if (key) out.private_key = key;
       return out;
     },
@@ -175,12 +175,9 @@ const APKGO_RECIPES = [
           throw new Error("未能自动获取到开发者邮箱，请确认已登录小米开放平台。");
         }
 
-        // 2. 等「获取私钥」那一块和里面的私钥渲染出来（私钥是页面异步拉的）。
-        const section = await h.waitFor(() => xiaomiKeySection(h), 8000);
-        if (!section) {
-          throw new Error("页面上没找到「获取私钥」。请确认停在「应用服务 → 自动发布接口」并已加载完，再点一次。");
-        }
-        const current = (await h.waitFor(() => xiaomiKeyIn(xiaomiKeySection(h), h), 4000)) || "";
+        // 2. 私钥：用户在这一页上点过「生成/重置私钥」的话，页面收到的 getPrivateKey
+        //    返回里就是最新那把；否则等「获取私钥」那一块渲染出来、从文字里读。
+        const current = (await xiaomiSniffedKey(h)) || (await h.waitFor(() => xiaomiKeyIn(xiaomiKeySection(h), h), 4000)) || "";
 
         if (!h.isReset) {
           if (current) {
@@ -189,23 +186,31 @@ const APKGO_RECIPES = [
           }
           // 没读到私钥：可能账号从没生成过，也可能页面还没加载完。重置会让
           // 已在用的私钥立刻失效（apkgo 里存的那把也一起作废），所以不替用户点。
-          const btn = xiaomiResetBtn(section, h);
+          const btn = xiaomiResetBtn(xiaomiKeySection(h), h);
           if (btn) h.highlight(btn);
           const btnName = btn ? h.textOf(btn).replace(/\s+/g, "") : "重置私钥";
-          throw new Error(`页面上没读到私钥。如果这个账号确实还没有私钥，请点绿框里的「${btnName}」生成一个，再点「一键获取密钥」；如果页面还没加载完，刷新后再试。`);
+          throw new Error(`没读到私钥。如果这个账号确实还没有私钥，请点绿框里的「${btnName}」生成一个，再点「一键获取密钥」；如果页面还没加载完，刷新后再试。`);
         }
 
-        // 3. 用户明确点了「重置私钥并重新保存」：重置 → 确认 → 等一把和原来不同的新私钥。
+        // 3. 用户明确点了「重置私钥并重新保存」：重置 → 确认 → 等一把和原来不同的新私钥，
+        //    优先从页面收到的 getPrivateKey 返回里取，其次看页面上显示的。
         //    等不到就报错，绝不退回旧私钥——它刚被重置作废了。
+        const section = await h.waitFor(() => xiaomiKeySection(h), 8000);
         const btn = xiaomiResetBtn(section, h);
-        if (!btn) throw new Error("页面上没找到「重置私钥」按钮。");
+        if (!btn) throw new Error("页面上没找到「重置私钥」按钮。请确认停在「应用服务 → 自动发布接口」并已加载完，再点一次。");
+        // 重置前看得到的每一把都算旧的：页面显示可能落后于接口返回，只排除 current
+        // 会把显示着的更早那把当成「新」的。
+        const old = new Set([current, await xiaomiSniffedKey(h), xiaomiKeyIn(section, h)]);
         btn.click();
         const ok = await h.waitFor(() => xiaomiConfirmBtn(h), 3000);
         if (ok) ok.click();
-        const fresh = await h.waitFor(() => {
-          const k = xiaomiKeyIn(xiaomiKeySection(h), h);
-          return k && k !== current ? k : null;
-        }, 10000);
+        let fresh = null;
+        const end = Date.now() + 10000;
+        while (!fresh && Date.now() < end) {
+          await h.wait(800);
+          const seen = [await xiaomiSniffedKey(h), xiaomiKeyIn(xiaomiKeySection(h), h)];
+          fresh = seen.find((k) => k && !old.has(k)) || null;
+        }
         if (!fresh) {
           throw new Error("已点「重置私钥」，但页面上没出现新的私钥。如果弹出了确认框，请点确认，然后点「一键获取密钥」读取新私钥（不用再重置）。");
         }
@@ -850,6 +855,11 @@ const APKGO_RECIPES = [
 // 私钥只在这一块里找，不扫整页：整页里别的长串（ID、哈希）会被错当成私钥，
 // 存进 apkgo 后发布时就是 -20014 密码错误。类名是 CSS Modules 带哈希的
 // （auto-publish-api_item__CeYdz），只按前缀认，认不到就退到小标题的父元素。
+//
+// 点「生成私钥」「重置私钥」时页面调 /pltapi/uiue/devtool/getPrivateKey，返回
+// {code: 0, data: "<新私钥>"}——名字叫 get，其实每调一次就生成一把新的、旧的作废。
+// 所以助手绝不自己调它，只读页面发过的返回（sniff-main.js 记下的），拿到的就是
+// 刚生成的那把，比等页面显示更准。
 const XIAOMI_KEY_RE = /^[A-Za-z0-9]{32,128}$/;
 const xiaomiNorm = (t) => String(t || "").replace(/\s+/g, "");
 
@@ -894,13 +904,19 @@ function xiaomiConfirmBtn(h) {
   return null;
 }
 
+// 后台接口都要带的会话参数（cookie 里的 mideveloper_ph + userId），没登录返回 ""。
+function xiaomiSession() {
+  const ph = document.cookie.match(/mideveloper_ph=([^;]+)/);
+  const uid = document.cookie.match(/\buserId=([^;]+)/);
+  return ph && uid ? `mideveloper_ph=${encodeURIComponent(ph[1])}&userId=${encodeURIComponent(uid[1])}` : "";
+}
+
 // 当前登录账号的开发者邮箱（小米 API 的 userName），取不到返回 ""。
 async function xiaomiEmail() {
   try {
-    const ph = document.cookie.match(/mideveloper_ph=([^;]+)/);
-    const uid = document.cookie.match(/\buserId=([^;]+)/);
-    if (!ph || !uid) return "";
-    const r = await fetch(`/pltapi/uiue/user?edit=1&mideveloper_ph=${encodeURIComponent(ph[1])}&userId=${encodeURIComponent(uid[1])}`, { credentials: "include" });
+    const session = xiaomiSession();
+    if (!session) return "";
+    const r = await fetch(`/pltapi/uiue/user?edit=1&${session}`, { credentials: "include" });
     if (!r.ok) return "";
     const d = await r.json();
     const email = d && d.data && d.data.email;
@@ -908,4 +924,13 @@ async function xiaomiEmail() {
   } catch {
     return "";
   }
+}
+
+// 页面最近一次 getPrivateKey 返回里的私钥（用户或助手点了生成/重置之后才有），没有返回 ""。
+async function xiaomiSniffedKey(h) {
+  const hits = (await h.responses())
+    .filter((x) => /\/devtool\/getPrivateKey\b/.test(x.url) && x.json && x.json.code === 0 && typeof x.json.data === "string")
+    .map((x) => x.json.data.trim())
+    .filter((k) => XIAOMI_KEY_RE.test(k));
+  return hits.length ? hits[hits.length - 1] : "";
 }

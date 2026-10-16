@@ -55,25 +55,28 @@
 <script>
   document.cookie = "mideveloper_ph=ph-test; path=/";
   document.cookie = "userId=10086; path=/";
-  // 测试用假私钥，形状同真私钥（50 位小写字母数字）。
-  const KEYS = ["k0", "k1", "k2", "k3"].map((p) => (p + "testkeyabcdefghijklmnopqrstuvwxyz0123456789abcdefgh").slice(0, 50));
-  window.__keys = KEYS;
-  window.__resets = 0;  // 真正完成的重置次数（点了「确 定」才算）
-  window.__stuck = false; // 置 true 时「确 定」不生效，新私钥永远不出现
+  // 和真页面一样：打开时显示已有的私钥（真页面从哪个接口来不重要，桩里用 /__fixture/key）；
+  // 只有点「生成私钥」/「重置私钥」并确认时才调 getPrivateKey——它每调一次就生成一把
+  // 新私钥，返回 {code: 0, data: "<新私钥>", msg: "success"}。私钥状态由 e2e 的路由桩掌握；
+  // x-fixture 头让桩分辨这是页面自己发的请求（扩展绝不该自己调 getPrivateKey）。
   const keyEl = document.getElementById("key");
+  const resetBtn = document.getElementById("reset");
   const modal = document.getElementById("modal");
-  let current = new URLSearchParams(location.search).get("nokey") ? "" : KEYS[0];
-  // 私钥是页面异步拉回来的：先渲染骨架，600ms 后私钥才到。
-  setTimeout(() => { keyEl.textContent = current; }, 600);
-  document.getElementById("reset").onclick = () => modal.classList.add("on");
-  document.getElementById("cancel").onclick = () => modal.classList.remove("on");
-  document.getElementById("ok").onclick = () => {
-    modal.classList.remove("on");
-    if (window.__stuck) return;
-    window.__resets++;
-    current = KEYS[window.__resets];
-    setTimeout(() => { keyEl.textContent = current; }, 400);
+  window.__noDomUpdate = false; // 置 true 时生成后页面不更新显示，只能从接口返回里拿到新私钥
+  const api = (path) => fetch(path + "?mideveloper_ph=ph-test&userId=10086", { headers: { "x-fixture": "page" } }).then((r) => r.json());
+  const show = (key) => {
+    keyEl.textContent = key || "";
+    resetBtn.firstElementChild.textContent = key ? "重置私钥" : "生成私钥";
   };
+  const generate = () => api("/pltapi/uiue/devtool/getPrivateKey").then((d) => {
+    if (d.code === 0 && !window.__noDomUpdate) setTimeout(() => show(d.data), 400);
+  });
+  // 私钥是页面异步拉回来的：先渲染骨架，600ms 后才显示。
+  setTimeout(() => api("/__fixture/key").then((d) => show(d.data)), 600);
+  // 没有私钥时「生成私钥」直接生成；有私钥时「重置私钥」先弹确认框。
+  resetBtn.onclick = () => (keyEl.textContent ? modal.classList.add("on") : generate());
+  document.getElementById("cancel").onclick = () => modal.classList.remove("on");
+  document.getElementById("ok").onclick = () => { modal.classList.remove("on"); generate(); };
 </script>
 </body>
 </html>
